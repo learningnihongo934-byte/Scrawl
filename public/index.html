@@ -65,6 +65,7 @@
   <section id="book" class="screen card wide" hidden>
     <h2>Runebook</h2>
     <p class="tag">Six runes. Teach each glyph by drawing it three times, then choose what it does.</p>
+    <div class="bookbar"><button id="breset" class="warn">Reset all runes to the starter six</button></div>
     <div class="bookgrid">
       <ol id="pages"></ol>
       <div class="editor">
@@ -77,7 +78,7 @@
       </div>
     </div>
     <footer class="row">
-      <button id="bexport">Export</button><button id="bimport">Import</button><button id="breset">Reset</button>
+      <button id="bexport">Export</button><button id="bimport">Import</button>
       <input id="bfile" type="file" accept="application/json,.json" hidden>
       <button data-menu class="big">Done</button>
     </footer>

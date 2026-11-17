@@ -167,9 +167,16 @@ export function mountBook(root, getBook, setBook) {
       commit({ runes: b.runes.map(r => ({ el: r.el, form: r.form, samples: r.samples })) }); msg.textContent = 'Runebook imported.'; renderAll();
     } catch { msg.textContent = "That file isn't a Scrawl runebook."; }
   };
-  $('#breset').onclick = () => {
-    if (!confirm('Reset all six runes to the starter runebook?')) return;
-    commit(defaultBook()); sel = 0; mode = 'test'; fresh = []; msg.textContent = 'Back to the starter runes.'; renderAll();
+  // two taps to reset, so a stray click can't wipe your runes
+  const rb = $('#breset'), rbLabel = rb.textContent;
+  let armed = null;
+  const disarm = () => { clearTimeout(armed); armed = null; rb.textContent = rbLabel; rb.classList.remove('armed'); };
+  rb.onclick = () => {
+    if (!armed) { rb.textContent = 'Tap again to reset all six runes'; rb.classList.add('armed'); armed = setTimeout(disarm, 3000); return; }
+    disarm();
+    commit(defaultBook()); sel = 0; mode = 'test'; fresh = []; strokes = []; shown = null;
+    msg.textContent = 'Back to the starter runes: Fire Bolt, Storm Bolt, Earth Wall, Life Shield, Void Orb, Frost Sigil.';
+    sfx('page'); renderAll();
   };
 
   return {

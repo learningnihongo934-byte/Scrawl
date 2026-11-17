@@ -142,3 +142,8 @@ footer { margin-top: 12px; font-size: 14px; color: var(--ink-soft); }
   #stage { width: 100vw; }
   .screen { position: fixed; }
 }
+
+.bookbar { display: flex; justify-content: center; margin: 4px 0 2px; }
+.warn { border: 1.5px solid var(--oxblood); color: var(--oxblood); padding: 6px 14px; font-size: 16px; }
+.warn:hover { background: rgba(142,43,30,0.08); }
+.warn.armed { background: var(--oxblood); color: var(--paper-hi); }
