@@ -1,0 +1,1 @@
+{ "name": "scrawl", "private": true, "type": "module", "scripts": { "check": "./build.sh check", "dev": "./build.sh dev", "deploy": "./build.sh deploy" } }

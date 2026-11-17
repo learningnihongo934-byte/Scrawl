@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Scrawl</title>
+<meta name="description" content="Draw your own spell runes and duel another wizard on one shared page. Online rooms and automaton opponents.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=IM+Fell+English+SC&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23e7d6b0'/%3E%3Cpath d='M7 24 L16 6 L25 24 Z' fill='none' stroke='%23b0391d' stroke-width='3' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<main id="stage">
+  <canvas id="page"></canvas>
+  <div id="bar" hidden><button id="leave" class="link">Leave duel</button></div>
+
+  <section id="menu" class="screen card" hidden>
+    <h1>Scrawl</h1>
+    <p class="tag">Draw your own spells. Duel on one page.</p>
+    <label class="name">Sign the page <input id="name" maxlength="16" autocomplete="off" spellcheck="false"></label>
+    <nav>
+      <button data-go="pick" class="big">Duel an automaton</button>
+      <button id="host" class="big">Open a room</button>
+      <button data-go="join" class="big">Join a room</button>
+      <div class="pair"><button data-go="book">Runebook</button><button data-go="help">How to play</button></div>
+    </nav>
+    <p id="menunote" class="note"></p>
+    <footer><button id="vol" class="link"></button> · Made by Virat Reddy Kaukuntla</footer>
+  </section>
+
+  <section id="pick" class="screen card" hidden>
+    <h2>Choose an automaton</h2>
+    <p class="tag">Clockwork wizards that draw their runes stroke by stroke.</p>
+    <div id="levels"></div>
+    <button data-menu class="link">Back</button>
+  </section>
+
+  <section id="lobby" class="screen card" hidden>
+    <h2>Your room</h2>
+    <div id="roomcode" class="code"></div>
+    <p>Give your rival this code, or send them the link.</p>
+    <div class="row"><input id="roomlink" readonly><button id="copylink">Copy</button></div>
+    <p id="lobbymsg" class="note"></p>
+    <button data-menu class="link">Close the room</button>
+  </section>
+
+  <section id="join" class="screen card" hidden>
+    <h2>Join a room</h2>
+    <p>Type the four letters your rival gave you.</p>
+    <input id="joincode" class="code" maxlength="4" placeholder="····" autocomplete="off" spellcheck="false">
+    <button id="joinbtn" class="big">Join</button>
+    <p id="joinmsg" class="note"></p>
+    <button data-menu class="link">Back</button>
+  </section>
+
+  <section id="book" class="screen card wide" hidden>
+    <h2>Runebook</h2>
+    <p class="tag">Six runes. Teach each glyph by drawing it three times, then choose what it does.</p>
+    <div class="bookgrid">
+      <ol id="pages"></ol>
+      <div class="editor">
+        <h3 id="ename"></h3>
+        <canvas id="pad" width="360" height="360"></canvas>
+        <p id="padmsg" class="note"></p>
+        <div class="samplerow"><div id="samples"></div><button id="redraw"></button></div>
+        <h4>Element</h4><div id="els" class="chips"></div><p id="eldesc" class="desc"></p>
+        <h4>Form</h4><div id="forms" class="chips"></div><p id="formdesc" class="desc"></p>
+      </div>
+    </div>
+    <footer class="row">
+      <button id="bexport">Export</button><button id="bimport">Import</button><button id="breset">Reset</button>
+      <input id="bfile" type="file" accept="application/json,.json" hidden>
+      <button data-menu class="big">Done</button>
+    </footer>
+  </section>
+
+  <section id="help" class="screen card wide" hidden>
+    <h2>How to play</h2>
+    <div class="helpgrid">
+      <div>
+        <h4>Draw to cast</h4>
+        <p>Your six runes sit along the bottom of the page. Draw one anywhere and pause for a moment. If the page recognizes it, it becomes the spell. If not, it fizzles.</p>
+        <h4>Where and how you draw</h4>
+        <p><b>Bolts</b> fly straight across from where you drew them. <b>Walls</b> stand where you drew them, on your half, as tall as your drawing. <b>Sigils</b> can go anywhere, even right on your rival, and ignite a moment later. <b>Orbs</b> hunt the enemy wizard. <b>Shields</b> wrap you.</p>
+        <p>Bigger drawings make stronger spells but cost more ink. Neater drawings are stronger too.</p>
+        <h4>Moving</h4>
+        <p>W and S or the arrow keys, or drag your own wizard up and down.</p>
+      </div>
+      <div>
+        <h4>Fusions</h4>
+        <p>Draw a rune on top of one of your own walls, sigils or orbs to fuse them: fire on storm makes Plasma, frost on earth makes Glacier, and so on. A bolt drawn on your own wall launches the whole wall as a <b>Ram</b>.</p>
+        <h4>Flourish</h4>
+        <p>Cast again within 1.6 seconds and the next spell grows stronger, up to ×1.4.</p>
+        <h4>Elements</h4>
+        <p>Fire beats Life, Life beats Earth, Earth beats Storm, Storm beats Frost, and Frost beats Fire. Void beats nothing but slips straight through walls.</p>
+        <h4>Winning</h4>
+        <p>Best of three rounds, 90 seconds each. Ink (mana) refills over time, and each rune needs a moment to dry before you can cast it again.</p>
+      </div>
+    </div>
+    <button data-menu class="big">Got it</button>
+  </section>
+
+  <section id="over" class="screen card" hidden>
+    <h2 id="overtitle"></h2>
+    <p id="oversub" class="tag"></p>
+    <ul id="overstats"></ul>
+    <p id="overmsg" class="note"></p>
+    <nav><button id="again" class="big">Rematch</button><button data-menu>Back to the menu</button></nav>
+  </section>
+</main>
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
