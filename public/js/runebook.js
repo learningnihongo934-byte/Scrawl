@@ -1,5 +1,5 @@
 // Scrawl runebook: six custom runes, saved in this browser. Each rune = 3 drawn samples + element + form.
-import { DEFAULT_RUNES, makeRune, EL, FORMS, EL_IDS, FORM_IDS, runeName } from './data.js';
+import { DEFAULT_RUNES, makeRune, EL, FORMS, EL_IDS, FORM_IDS, runeName, fusionName } from './data.js';
 import { templatesFor, recognize, normalize, match } from './recognizer.js';
 import { drawGlyph, brush, makeParchment, INK, elc } from './render.js';
 import { sfx, audioInit, scratchStart, scratchStop, scratchSpeed } from './audio.js';
@@ -84,7 +84,28 @@ export function mountBook(root, getBook, setBook) {
     $('#redraw').textContent = mode === 'record' ? 'Cancel redraw' : 'Redraw this glyph';
     if (mode === 'record') msg.textContent = `Draw your new glyph on the pad: ${fresh.length + 1} of 3. Pause and it's taken.`;
   }
-  function renderAll() { renderPages(); renderEditor(); drawPad(); }
+  // every fusion: rows x columns of elements, lower triangle (the order you fuse in doesn't matter)
+  function renderFusions() {
+    const have = new Set(book().runes.map(r => r.el));
+    const t = document.createElement('table');
+    const head = t.insertRow(); head.insertCell().textContent = '';
+    for (const b of EL_IDS) { const c = document.createElement('th'); c.textContent = EL[b].name; c.style.color = EL[b].ink; head.append(c); }
+    EL_IDS.forEach((a, i) => {
+      const row = t.insertRow();
+      const th = document.createElement('th'); th.textContent = EL[a].name; th.style.color = EL[a].ink; row.append(th);
+      EL_IDS.forEach((b, j) => {
+        const c = row.insertCell();
+        if (j > i) return;
+        const nm = fusionName(i === j ? [a] : [a, b]);
+        c.textContent = i === j ? 'Greater' : nm;
+        c.title = `${EL[a].name} + ${EL[b].name} = ${nm}`;
+        c.className = 'fz' + (have.has(a) && have.has(b) ? ' have' : '');
+        c.style.setProperty('--a', EL[a].ink); c.style.setProperty('--b', EL[b].ink);
+      });
+    });
+    const g = $('#fusegrid'); g.innerHTML = ''; g.append(t);
+  }
+  function renderAll() { renderPages(); renderEditor(); drawPad(); renderFusions(); }
 
   $('#redraw').onclick = () => {
     if (mode === 'record') { mode = 'test'; fresh = []; msg.textContent = 'Kept the old glyph.'; }

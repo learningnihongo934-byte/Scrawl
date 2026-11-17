@@ -68,7 +68,7 @@ export class Book3D {
     this.tether = mesh(new THREE.CylinderGeometry(0.035, 0.035, 1, 5, 1, true), glow('#3c6d37', 0.8, { transparent: true, opacity: 0.8 }), false);
     this.tether.visible = false; s.add(this.tether);
     this.ents = new Map(); this.fx = []; this.ray = new THREE.Raycaster(); this.t = 0; this.upT = 0;
-    this.inkLive = new Map(); this.inkAnims = [];
+    this.inkLive = new Map(); this.inkAnims = []; this.hl = null; this.hlT = 0;
     this.inkMat = new THREE.MeshStandardMaterial({ color: '#1a120c', roughness: 0.28, metalness: 0.15, flatShading: true, side: THREE.DoubleSide });
     this.shardGeo = new THREE.TetrahedronGeometry(1, 0);
     this.setView(0);
@@ -520,6 +520,8 @@ export class Book3D {
     let best = null; for (const [id, n] of tally) if (!best || n > best.n) best = { id, n };
     return best && best.n >= 2 ? best.id : null;
   }
+  // pulse a gold ring on the spell a drawing will fuse with
+  fuseHint(id) { if (id !== this.hl) this.hlT = 0; this.hl = id; }
   // client px -> overlay space (W x H)
   toOverlay(cx, cy) { const r = this.gl.getBoundingClientRect(); return [(cx - r.left) / r.width * W, (cy - r.top) / r.height * H]; }
   project(x, y, h = 1.2) {
@@ -534,6 +536,12 @@ export class Book3D {
     if (this.upT >= 1 / 30 && this.layer.drawPage(S, this.upT)) { this.tex.needsUpdate = true; }
     if (this.upT >= 1 / 30) this.upT = 0;
     this.updateLiveInk(); this.updateInkAnims(dt);
+    if (this.hl !== null && S) {
+      this.hlT -= dt;
+      const e = S.ents.find(x => x.id === this.hl);
+      if (!e) this.hl = null;
+      else if (this.hlT <= 0) { this.hlT = 0.25; this.flash(e.x, e.y, e.k === 'wall' ? e.len * 0.6 : 70, ['radiant'], 0.45); }
+    }
     if (S) { this.wizards(S, dt); this.sync(S, dt); }
     else { this.wiz.forEach(m => { m.g.visible = false; }); this.tether.visible = false; if (this.ents.size) this.clearEnts(); }
     this.updateFx(dt);

@@ -1,7 +1,7 @@
 // Scrawl: screens, pen input, game loop, AI duels, tutorial and online rooms (host runs the sim, guest sends casts).
 import { W, H, EL, FORMS, runeName } from './data.js';
 import { newMatch, step, cast, snapshot, runeCost, sizePower } from './sim.js';
-import { recognize, templatesFor, shapeOf } from './recognizer.js';
+import { recognize, templatesFor, shapeOf, REJECT } from './recognizer.js';
 import { INK } from './render.js';
 import { Book3D } from './render3d.js';
 import { audioInit, sfx, scratchStart, scratchStop, scratchSpeed, getVol, setVol } from './audio.js';
@@ -261,6 +261,9 @@ gl.onpointermove = e => {
     pen.last = { x: ev.clientX, y: ev.clientY, t: now }; scratchSpeed(v);
   }
   pen.dirty = true;
+  // light up my own spell when the drawing is over it, so you can see a fusion is aimed
+  const t = performance.now();
+  if (t - (pen.hintAt || 0) > 120) { pen.hintAt = t; R.fuseHint(R.pickHost(pen.scr.flatMap(s => s.filter((_, j) => j % 3 === 0)), me)); }
 };
 gl.onpointerup = gl.onpointercancel = () => {
   if (!pen.cur) return;
@@ -273,7 +276,7 @@ const slimW = (s, n = 50) => { const step = Math.max(1, s.length / n), out = [];
 function finishRune() {
   const keep = pen.strokes.map((s, i) => s.length > 1 ? i : -1).filter(i => i >= 0);
   const strokes = keep.map(i => pen.strokes[i]), scr = keep.map(i => pen.scr[i]);
-  pen.strokes = []; pen.scr = []; R.liveInk('me', null);
+  pen.strokes = []; pen.scr = []; R.liveInk('me', null); R.fuseHint(null);
   const end = res => net?.send({ t: 'inkEnd', g: pen.g, res });
   if (!S || S.phase !== 'fight' || !strokes.length) { end('none'); return; }
   const sh = shapeOf(strokes.map(s => s.map(p => [p[0], p[1]])));
@@ -288,8 +291,13 @@ function finishRune() {
   }
   // two clean runes beat one muddy one (a quick wall-then-bolt Ram); real two-stroke runes don't split cleanly
   if (split && (!parts || split.d / 2 < whole.d - 0.08)) parts = split.parts;
+  // drawn on top of one of my own spells and nearly a rune: the intent is clear, so cast the closest match
+  const near = whole && whole.slot < 0 && whole.near !== undefined ? whole.near : -1;
+  if (!parts && near >= 0 && whole.d < REJECT + 0.5 && R.pickHost(scr.flatMap(s => s.filter((_, j) => j % 4 === 0)), me) !== null)
+    parts = [{ a: 0, b: strokes.length, res: { slot: near, d: whole.d, q: 0.15 } }];
   if (!parts) {
-    R.glyphDone(strokes, 'fizzle'); sfx('fizzle'); L.pop(sh.cx, sh.cy, 'fizzled', '#6b5a48', 22);
+    R.glyphDone(strokes, 'fizzle'); sfx('fizzle');
+    L.pop(sh.cx, sh.cy, near >= 0 ? `fizzled (closest: ${runeName(S.loadouts[me][near])})` : 'fizzled', '#6b5a48', 22);
     end('fizzle'); return;
   }
   parts.forEach((pt, i) => {
