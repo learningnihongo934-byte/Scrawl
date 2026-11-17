@@ -17,6 +17,7 @@ function mat(color, o = {}) {
   return matCache.get(key);
 }
 const glow = (color, k = 0.45, o = {}) => mat(color, { emissive: color, emissiveIntensity: k, ...o });
+const at = (m, x, y, z) => { m.position.set(x, y, z); return m; };
 function mesh(geo, m, cast = true) { const x = new THREE.Mesh(geo, m); x.castShadow = cast; x.receiveShadow = true; return x; }
 const WALL_LOOK = {
   earth: ['#8a6a3e', {}], frost: ['#a9cbe6', { transparent: true, opacity: 0.85, roughness: 0.3 }], fire: ['#7d2412', { emissive: '#e0531e', emissiveIntensity: 0.55 }],
@@ -52,7 +53,7 @@ export class Book3D {
     r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.1;
     const s = this.scene = new THREE.Scene();
     s.background = new THREE.Color('#150d08'); s.fog = new THREE.Fog('#150d08', 24, 44);
-    this.cam = new THREE.PerspectiveCamera(33, 16 / 9, 0.1, 100);
+    this.cam = new THREE.PerspectiveCamera(46, 16 / 9, 0.1, 100);
     this.side = 0; this.camBase = new THREE.Vector3(); this.camLook = new THREE.Vector3(); this.placeCamera();
 
     s.add(new THREE.HemisphereLight('#ffe9c7', '#2a1a10', 0.6));
@@ -74,7 +75,7 @@ export class Book3D {
 
   placeCamera() {
     const sgn = this.side === 0 ? 1 : -1;
-    this.camBase.set(0, 11.6, 10.0 * sgn); this.camLook.set(0, -0.3, 0.75 * sgn);
+    this.camBase.set(-14.4 * sgn, 6.6, 1.7 * sgn); this.camLook.set(1.2 * sgn, -0.9, 0);   // third person: over your wizard's shoulder
     this.cam.position.copy(this.camBase); this.cam.lookAt(this.camLook);
   }
   setView(me) {
@@ -122,17 +123,17 @@ export class Book3D {
     const s = this.scene;
     // candle
     const c = new THREE.Group(); c.position.set(-9.8, -0.42, -3.4);
-    c.add(Object.assign(mesh(new THREE.CylinderGeometry(0.6, 0.7, 0.12, 10), mat('#a07a3a', { metalness: 0.6, roughness: 0.45 })), { position: new THREE.Vector3(0, 0.06, 0) }));
-    c.add(Object.assign(mesh(new THREE.CylinderGeometry(0.22, 0.25, 1.5, 9), mat('#efe6cf')), { position: new THREE.Vector3(0, 0.87, 0) }));
+    c.add(at(mesh(new THREE.CylinderGeometry(0.6, 0.7, 0.12, 10), mat('#a07a3a', { metalness: 0.6, roughness: 0.45 })), 0, 0.06, 0));
+    c.add(at(mesh(new THREE.CylinderGeometry(0.22, 0.25, 1.5, 9), mat('#efe6cf')), 0, 0.87, 0));
     this.flame = mesh(new THREE.ConeGeometry(0.09, 0.3, 6), new THREE.MeshBasicMaterial({ color: '#ffbe5c' }), false); this.flame.position.set(0, 1.78, 0); c.add(this.flame);
     this.candle = new THREE.PointLight('#ffad5a', 3, 16, 1.6); this.candle.position.set(0, 1.9, 0); c.add(this.candle);
     s.add(c);
     // ink pot and quill
     const ink = new THREE.Group(); ink.position.set(9.7, -0.42, -3.1);
-    ink.add(Object.assign(mesh(new THREE.CylinderGeometry(0.5, 0.58, 0.62, 8), mat('#1f2633', { roughness: 0.25, metalness: 0.2 })), { position: new THREE.Vector3(0, 0.31, 0) }));
-    ink.add(Object.assign(mesh(new THREE.CylinderGeometry(0.27, 0.32, 0.2, 8), mat('#1f2633', { roughness: 0.25 })), { position: new THREE.Vector3(0, 0.72, 0) }));
+    ink.add(at(mesh(new THREE.CylinderGeometry(0.5, 0.58, 0.62, 8), mat('#1f2633', { roughness: 0.25, metalness: 0.2 })), 0, 0.31, 0));
+    ink.add(at(mesh(new THREE.CylinderGeometry(0.27, 0.32, 0.2, 8), mat('#1f2633', { roughness: 0.25 })), 0, 0.72, 0));
     const quill = new THREE.Group(); quill.position.set(0, 0.7, 0); quill.rotation.set(0.25, 0, -0.45);
-    quill.add(Object.assign(mesh(new THREE.CylinderGeometry(0.02, 0.025, 2.6, 4), mat('#d9cfb8')), { position: new THREE.Vector3(0, 1.1, 0) }));
+    quill.add(at(mesh(new THREE.CylinderGeometry(0.02, 0.025, 2.6, 4), mat('#d9cfb8')), 0, 1.1, 0));
     const vane = mesh(new THREE.ConeGeometry(0.22, 2.0, 4), mat('#efe8d8')); vane.scale.set(1, 1, 0.22); vane.position.set(0, 1.5, 0); quill.add(vane);
     ink.add(quill); s.add(ink);
     // a couple of closed books
@@ -149,7 +150,7 @@ export class Book3D {
     const brim = mesh(new THREE.CylinderGeometry(0.43, 0.43, 0.05, 8), mat('#22324d')); brim.position.y = 1.47; body.add(brim);
     const hat = mesh(new THREE.ConeGeometry(0.27, 0.9, 7), mat('#22324d')); hat.position.set(0, 1.92, -0.03); hat.rotation.x = -0.14; body.add(hat);
     const staff = new THREE.Group(); staff.position.set(0.44, 0, 0.14); body.add(staff);
-    staff.add(Object.assign(mesh(new THREE.CylinderGeometry(0.035, 0.045, 1.9, 5), mat('#6b4a2b')), { position: new THREE.Vector3(0, 0.95, 0) }));
+    staff.add(at(mesh(new THREE.CylinderGeometry(0.035, 0.045, 1.9, 5), mat('#6b4a2b')), 0, 0.95, 0));
     const gemM = new THREE.MeshStandardMaterial({ color: '#e7d6b0', emissive: '#e7d6b0', emissiveIntensity: 0.3, flatShading: true });
     const gem = mesh(new THREE.OctahedronGeometry(0.12, 0), gemM); gem.position.y = 1.97; staff.add(gem);
     const arm = mesh(new THREE.CylinderGeometry(0.07, 0.1, 0.55, 5), mat('#34507a')); arm.position.set(0.28, 0.98, 0.1); arm.rotation.z = -0.9; body.add(arm);
@@ -211,14 +212,14 @@ export class Book3D {
         break;
       }
       case 'totem': {
-        g.add(Object.assign(mesh(new THREE.BoxGeometry(0.5, 0.16, 0.5), mat('#6d6152')), { position: new THREE.Vector3(0, 0.08, 0) }));
-        g.add(Object.assign(mesh(new THREE.CylinderGeometry(0.15, 0.22, 1.0, 6), mat(c)), { position: new THREE.Vector3(0, 0.66, 0) }));
+        g.add(at(mesh(new THREE.BoxGeometry(0.5, 0.16, 0.5), mat('#6d6152')), 0, 0.08, 0));
+        g.add(at(mesh(new THREE.CylinderGeometry(0.15, 0.22, 1.0, 6), mat(c)), 0, 0.66, 0));
         o.cap = mesh(new THREE.OctahedronGeometry(0.22, 0), glow(c2, 0.9)); o.cap.position.y = 1.4; g.add(o.cap);
         o.h = 0;
         break;
       }
       case 'mine': {
-        g.add(Object.assign(mesh(new THREE.DodecahedronGeometry(0.2, 0), mat('#4a4540', { metalness: 0.4 })), { position: new THREE.Vector3(0, 0.1, 0) }));
+        g.add(at(mesh(new THREE.DodecahedronGeometry(0.2, 0), mat('#4a4540', { metalness: 0.4 })), 0, 0.1, 0));
         for (let i = 0; i < 6; i++) { const sp = mesh(new THREE.ConeGeometry(0.04, 0.16, 4), mat('#4a4540'), false); const a = i / 6 * Math.PI * 2; sp.position.set(Math.cos(a) * 0.2, 0.12, Math.sin(a) * 0.2); sp.rotation.z = -Math.cos(a) * 1.4; sp.rotation.x = Math.sin(a) * 1.4; g.add(sp); }
         o.blink = mesh(new THREE.IcosahedronGeometry(0.05, 0), new THREE.MeshBasicMaterial({ color: c }), false); o.blink.position.y = 0.3; g.add(o.blink);
         o.h = 0;
