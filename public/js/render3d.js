@@ -48,7 +48,7 @@ export class Book3D {
     this.layer = new PageLayer();
     this.gl = gl; this.hud = hud; this.hg = hud.getContext('2d');
     const r = this.r = new THREE.WebGLRenderer({ canvas: gl, antialias: true, powerPreference: 'high-performance' });
-    r.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    r.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));
     r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
     r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.1;
     const s = this.scene = new THREE.Scene();
@@ -58,7 +58,7 @@ export class Book3D {
 
     s.add(new THREE.HemisphereLight('#ffe9c7', '#2a1a10', 0.6));
     const key = new THREE.DirectionalLight('#ffe2b8', 2.1); key.position.set(-7, 14, 7); key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048); Object.assign(key.shadow.camera, { left: -12, right: 12, top: 9, bottom: -9, near: 1, far: 40 });
+    key.shadow.mapSize.set(1024, 1024); Object.assign(key.shadow.camera, { left: -12, right: 12, top: 9, bottom: -9, near: 1, far: 40 });
     key.shadow.bias = -0.0004; key.shadow.normalBias = 0.02; s.add(key);
     const fill = new THREE.DirectionalLight('#9fb4d8', 0.35); fill.position.set(8, 6, -6); s.add(fill);
 
@@ -67,7 +67,9 @@ export class Book3D {
     this.wiz.forEach(m => { m.g.visible = false; s.add(m.g); });
     this.tether = mesh(new THREE.CylinderGeometry(0.035, 0.035, 1, 5, 1, true), glow('#3c6d37', 0.8, { transparent: true, opacity: 0.8 }), false);
     this.tether.visible = false; s.add(this.tether);
-    this.ents = new Map(); this.fx = []; this.ray = new THREE.Raycaster(); this.t = 0;
+    this.ents = new Map(); this.fx = []; this.ray = new THREE.Raycaster(); this.t = 0; this.upT = 0;
+    this.inkLive = new Map(); this.inkAnims = [];
+    this.inkMat = new THREE.MeshStandardMaterial({ color: '#1a120c', roughness: 0.28, metalness: 0.15, flatShading: true, side: THREE.DoubleSide });
     this.shardGeo = new THREE.TetrahedronGeometry(1, 0);
     this.setView(0);
     this.resize();
@@ -83,7 +85,7 @@ export class Book3D {
     this.wiz.forEach((m, p) => { const mine = p === me; m.robe.material = m.arm.material = new THREE.MeshStandardMaterial({ color: mine ? '#34507a' : '#8a3324', roughness: 0.85, flatShading: true }); m.hat.material = mat(mine ? '#22324d' : '#5a1f16'); m.brim.material = m.hat.material; });
   }
   resize() {
-    const rect = this.gl.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
+    const rect = this.gl.getBoundingClientRect(), dpr = Math.min(1.5, window.devicePixelRatio || 1);
     this.r.setPixelRatio(dpr); this.r.setSize(Math.max(1, rect.width), Math.max(1, rect.height), false);
     this.cam.aspect = rect.width / Math.max(1, rect.height); this.cam.updateProjectionMatrix();
     this.hud.width = Math.round(rect.width * dpr); this.hud.height = Math.round(rect.height * dpr);
@@ -313,7 +315,72 @@ export class Book3D {
     o.g.traverse(m => { if (m.geometry) m.geometry.dispose(); });
     this.ents.delete(id);
   }
-  clearEnts() { for (const [id, o] of this.ents) this.drop3d(id, o); for (const f of this.fx) this.scene.remove(f.m); this.fx = []; }
+  clearEnts() { for (const [id, o] of this.ents) this.drop3d(id, o); for (const f of this.fx) this.scene.remove(f.m); this.fx = []; this.clearInk(); }
+
+  // ---------- 3D ink: raised wet-ink ribbons standing on the paper ----------
+  ribbon(pts, lift = 0.015) {
+    const n = pts.length, pos = new Float32Array(Math.max(2, n) * 12), idx = [];
+    const P = n === 1 ? [pts[0], [pts[0][0] + 0.5, pts[0][1], pts[0][2]]] : pts;
+    for (let i = 0; i < P.length; i++) {
+      const [x, y, w] = P[i], a = P[Math.max(0, i - 1)], b = P[Math.min(P.length - 1, i + 1)];
+      let dx = b[0] - a[0], dy = b[1] - a[1]; const l = Math.hypot(dx, dy) || 1; dx /= l; dy /= l;
+      const hw = (w || 4) * U * 1.6, ox = -dy * hw, oz = dx * hw, wx = X(x), wz = Z(y);
+      const base = pageH(x) + lift, top = base + 0.07 + (w || 4) * 0.016;
+      pos.set([wx + ox, top, wz + oz, wx - ox, top, wz - oz, wx + ox, base, wz + oz, wx - ox, base, wz - oz], i * 12);
+      if (i) { const p0 = (i - 1) * 4, q = i * 4; idx.push(p0, q, p0 + 1, p0 + 1, q, q + 1, p0 + 2, q + 2, p0, p0, q + 2, q, p0 + 1, q + 1, p0 + 3, p0 + 3, q + 1, q + 3); }
+    }
+    const last = (P.length - 1) * 4; idx.push(0, 1, 2, 2, 1, 3, last, last + 1, last + 2, last + 2, last + 1, last + 3);
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos.subarray(0, P.length * 12), 3)); g.setIndex(idx); g.computeVertexNormals();
+    return g;
+  }
+  liveInk(key, strokes) {
+    let L = this.inkLive.get(key);
+    if (!strokes || !strokes.length) { if (L) { L.meshes.forEach(m => { this.scene.remove(m); m.geometry.dispose(); }); this.inkLive.delete(key); } return; }
+    if (!L) { L = { strokes, meshes: [], ns: [] }; this.inkLive.set(key, L); }
+    L.strokes = strokes;
+  }
+  updateLiveInk() {
+    for (const L of this.inkLive.values()) {
+      L.strokes.forEach((s, i) => {
+        if (L.ns[i] === s.length || !s.length) return;
+        let m = L.meshes[i];
+        if (!m) { m = new THREE.Mesh(undefined, this.inkMat); m.castShadow = true; this.scene.add(m); L.meshes[i] = m; }
+        else m.geometry.dispose();
+        m.geometry = this.ribbon(s, 0.03); L.ns[i] = s.length;
+      });
+      while (L.meshes.length > L.strokes.length) { const m = L.meshes.pop(); L.ns.pop(); this.scene.remove(m); m.geometry.dispose(); }
+    }
+  }
+  glyphDone(strokes, mode, els) {
+    if (!strokes || !strokes.length) return;
+    const cast = mode === 'cast', c = new THREE.Color(cast ? elc(els) : '#7a6a58');
+    const m = new THREE.MeshStandardMaterial({ color: '#1a120c', emissive: c, emissiveIntensity: 0, roughness: 0.3, metalness: 0.15, flatShading: true, side: THREE.DoubleSide, transparent: true });
+    const g = new THREE.Group();
+    for (const s of strokes) if (s.length) { const x = new THREE.Mesh(this.ribbon(s, 0.03), m); x.castShadow = true; g.add(x); }
+    this.scene.add(g);
+    this.inkAnims.push({ g, m, c, cast, t: 0, life: cast ? 0.75 : 0.8, strokes, els });
+    if (cast) this.layer.stamp(strokes, elc(els));
+  }
+  updateInkAnims(dt) {
+    for (const a of this.inkAnims) {
+      a.t += dt; const k = Math.min(1, a.t / a.life);
+      if (a.cast) {
+        a.m.color.lerpColors(new THREE.Color('#1a120c'), a.c, Math.min(1, k * 2.5));
+        a.m.emissiveIntensity = 1.6 * Math.min(1, k * 3); a.g.position.y = k * k * 1.4; a.m.opacity = 1 - k * k * k;
+        if (a.t >= a.life && !a.burst) {
+          a.burst = true;
+          for (const s of a.strokes) for (let i = 0; i < s.length; i += Math.max(1, Math.floor(s.length / 6))) this.shard(X(s[i][0]), pageH(s[i][0]) + 1.4, Z(s[i][1]), elc(a.els, i % 2), 0.06, 1.8, 1.5, 0.6, 6);
+        }
+      } else {
+        a.m.color.lerp(a.c, Math.min(1, k * 3)); a.g.position.y = -k * 0.08; a.g.rotation.z = k * 0.03; a.m.opacity = 1 - k;
+        a.g.children.forEach((x, i) => { x.position.y = -k * k * 0.3 * (1 + (i % 3) * 0.4); });
+      }
+    }
+    const done = this.inkAnims.filter(a => a.t >= a.life);
+    for (const a of done) { this.scene.remove(a.g); a.g.children.forEach(x => x.geometry.dispose()); a.m.dispose(); }
+    if (done.length) this.inkAnims = this.inkAnims.filter(a => a.t < a.life);
+  }
+  clearInk() { for (const k of [...this.inkLive.keys()]) this.liveInk(k, null); for (const a of this.inkAnims) a.t = a.life + 1; this.updateInkAnims(0); }
 
   // ---------- particles ----------
   shard(x, y, z, color, size, speed, up, life = 0.7, grav = 0) {
@@ -448,7 +515,11 @@ export class Book3D {
 
   frame(S, view, dt) {
     this.t += dt; this.lastS = S;
-    this.layer.drawPage(S, dt); this.tex.needsUpdate = true;
+    // the page texture is only re-sent to the GPU when it changed, at most ~30 times a second
+    this.upT += dt;
+    if (this.upT >= 1 / 30 && this.layer.drawPage(S, this.upT)) { this.tex.needsUpdate = true; }
+    if (this.upT >= 1 / 30) this.upT = 0;
+    this.updateLiveInk(); this.updateInkAnims(dt);
     if (S) { this.wizards(S, dt); this.sync(S, dt); }
     else { this.wiz.forEach(m => { m.g.visible = false; }); this.tether.visible = false; if (this.ents.size) this.clearEnts(); }
     this.updateFx(dt);

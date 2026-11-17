@@ -30,7 +30,7 @@ function show(id) {
 }
 function toMenu(note) {
   if (net) { net.close(); net = null; }
-  mode = 'menu'; S = null; bot = null; tut = null; L.guide = null; R.setView(0); L.reset(); remote.clear(); activeTmpls = tmpls;
+  mode = 'menu'; S = null; bot = null; tut = null; L.guide = null; R.setView(0); L.reset(); R.clearInk(); remote.clear(); activeTmpls = tmpls;
   show('menu');
   $('#menunote').textContent = note || '';
 }
@@ -98,6 +98,7 @@ function showTutStep() {
     const r = STARTER.runes[st.slot];
     L.guide = { strokes: r.samples[0], x: st.at[0], y: st.at[1], size: 140, c: EL[r.el].ink };
   } else L.guide = null;
+  L.dirty = true;
 }
 function tutEvent(e) {
   if (!tut || TUT[tut.i].end) return;
@@ -185,12 +186,12 @@ function onNet(m) {
     case 'ink': {
       if (!Array.isArray(m.s) || m.s.length > 6) return;
       const strokes = m.s.filter(s => Array.isArray(s)).map(s => s.slice(0, 80));
-      remote.set(m.g, strokes); L.liveInk('r' + m.g, strokes);
+      remote.set(m.g, strokes); R.liveInk('r' + m.g, strokes);
       break;
     }
     case 'inkEnd': {
-      const strokes = remote.get(m.g); remote.delete(m.g); L.liveInk('r' + m.g, null);
-      if (strokes && m.res !== 'none') L.glyphDone(strokes, m.res === 'cast' ? 'cast' : 'fizzle', EL[m.el] ? [m.el] : null);
+      const strokes = remote.get(m.g); remote.delete(m.g); R.liveInk('r' + m.g, null);
+      if (strokes && m.res !== 'none') R.glyphDone(strokes, m.res === 'cast' ? 'cast' : 'fizzle', EL[m.el] ? [m.el] : null);
       break;
     }
     case 'again':
@@ -212,13 +213,13 @@ function sendCast(spec, rune, strokes) {
   if (mode === 'guest') {
     const w = S.wiz[me], cost = runeCost(rune.form, spec.quick ? 1 : sizePower(spec.w, spec.h));
     const why = w.silenceT > 0 || w.shockT > 0 ? 'silenced' : w.cds[spec.slot] > 0 ? 'cd' : w.mana < cost ? 'mana' : null;
-    if (why) { L.event({ type: 'fail', reason: why, x: spec.cx, y: spec.cy }); if (strokes) L.glyphDone(strokes, 'fizzle'); sfx('fizzle'); end('fizzle'); return; }
+    if (why) { L.event({ type: 'fail', reason: why, x: spec.cx, y: spec.cy }); if (strokes) R.glyphDone(strokes, 'fizzle'); sfx('fizzle'); end('fizzle'); return; }
     net.send({ t: 'cast', spec });
-    if (strokes) L.glyphDone(strokes, 'cast', [rune.el]); end('cast', rune.el);
+    if (strokes) R.glyphDone(strokes, 'cast', [rune.el]); end('cast', rune.el);
   } else {
     const r = cast(S, me, spec);
-    if (r.ok) { if (strokes) L.glyphDone(strokes, 'cast', [rune.el]); end('cast', rune.el); }
-    else { if (strokes) L.glyphDone(strokes, 'fizzle'); sfx('fizzle'); end('fizzle'); }
+    if (r.ok) { if (strokes) R.glyphDone(strokes, 'cast', [rune.el]); end('cast', rune.el); }
+    else { if (strokes) R.glyphDone(strokes, 'fizzle'); sfx('fizzle'); end('fizzle'); }
   }
 }
 // hotkey / tap: a fixed spot that suits the form
@@ -246,13 +247,13 @@ gl.onpointerdown = e => {
   pen.cur = [[at[0], at[1], 4]]; pen.curS = [[e.clientX, e.clientY]];
   pen.strokes.push(pen.cur); pen.scr.push(pen.curS);
   pen.last = { x: e.clientX, y: e.clientY, t: performance.now() };
-  scratchStart(); L.liveInk('me', pen.strokes); pen.dirty = true;
+  scratchStart(); R.liveInk('me', pen.strokes); pen.dirty = true;
 };
 gl.onpointermove = e => {
   if (!pen.cur) return;
   for (const ev of e.getCoalescedEvents?.() || [e]) {
     const now = performance.now(), d = Math.hypot(ev.clientX - pen.last.x, ev.clientY - pen.last.y);
-    if (d < 1.5) continue;
+    if (d < 3) continue;
     const at = R.pick(ev.clientX, ev.clientY); if (!at) continue;
     const v = d / Math.max(1, now - pen.last.t) * 1000;
     pen.cur.push([at[0], at[1], Math.max(2.4, Math.min(7.5, 8 - v * 0.004))]); pen.curS.push([ev.clientX, ev.clientY]);
@@ -271,14 +272,14 @@ const slimW = (s, n = 50) => { const step = Math.max(1, s.length / n), out = [];
 function finishRune() {
   const keep = pen.strokes.map((s, i) => s.length > 1 ? i : -1).filter(i => i >= 0);
   const strokes = keep.map(i => pen.strokes[i]), scr = keep.map(i => pen.scr[i]);
-  pen.strokes = []; pen.scr = []; L.liveInk('me', null);
+  pen.strokes = []; pen.scr = []; R.liveInk('me', null);
   const end = res => net?.send({ t: 'inkEnd', g: pen.g, res });
   if (!S || S.phase !== 'fight' || !strokes.length) { end('none'); return; }
   const sh = shapeOf(strokes.map(s => s.map(p => [p[0], p[1]])));
   if (sh.len < 26) { end('none'); return; }
   const res = recognize(scr, activeTmpls);   // recognize what the player saw on screen, place it on the page
   if (!res || res.slot < 0) {
-    L.glyphDone(strokes, 'fizzle'); sfx('fizzle'); L.pop(sh.cx, sh.cy, 'fizzled', '#6b5a48', 22);
+    R.glyphDone(strokes, 'fizzle'); sfx('fizzle'); L.pop(sh.cx, sh.cy, 'fizzled', '#6b5a48', 22);
     end('fizzle'); return;
   }
   sendCast({ slot: res.slot, cx: sh.cx, cy: sh.cy, w: sh.w, h: sh.h, ang: sh.ang, q: res.q }, S.loadouts[me][res.slot], strokes);
@@ -343,16 +344,16 @@ const arcadeScore = (score, meta) => { try { if (window.parent !== window) windo
 let prev = performance.now(), lastCount = 0;
 function runBot(dt) {
   const job = bot.update(S, dt);
-  if (job) L.liveInk('bot', []);
+  if (job) R.liveInk('bot', []);
   if (!bot.job) return;
   const j = bot.job; j.t += dt;
   const total = j.strokes.reduce((a, s) => a + s.length, 0);
   let n = Math.floor(total * Math.min(1, j.t / j.dur));
-  L.liveInk('bot', j.strokes.map(s => { const k = Math.min(s.length, Math.max(0, n)); n -= k; return s.slice(0, k); }).filter(s => s.length));
+  R.liveInk('bot', j.strokes.map(s => { const k = Math.min(s.length, Math.max(0, n)); n -= k; return s.slice(0, k); }).filter(s => s.length));
   if (j.t >= j.dur) {
-    bot.job = null; L.liveInk('bot', null);
+    bot.job = null; R.liveInk('bot', null);
     const r = cast(S, bot.p, j.spec);
-    L.glyphDone(j.strokes, r.ok ? 'cast' : 'fizzle', r.ok ? [S.loadouts[bot.p][j.slot].el] : null);
+    R.glyphDone(j.strokes, r.ok ? 'cast' : 'fizzle', r.ok ? [S.loadouts[bot.p][j.slot].el] : null);
   }
 }
 function runDummy(dt) {

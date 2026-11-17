@@ -127,9 +127,9 @@ export class PageLayer {
     this.sg = this.stain.getContext('2d');
     this.slip = makeParchment(320, 160, false);
     this.parts = []; this.pops = []; this.glyphs = []; this.rings = []; this.live = new Map();
-    this.banner = null; this.thumbs = new WeakMap(); this.t = 0; this.guide = null; this.shake = 0;
+    this.banner = null; this.thumbs = new WeakMap(); this.t = 0; this.guide = null; this.shake = 0; this.dirty = true;
   }
-  reset() { this.sg.clearRect(0, 0, W, H); this.parts = []; this.pops = []; this.glyphs = []; this.rings = []; this.live.clear(); this.banner = null; }
+  reset() { this.dirty = true; this.sg.clearRect(0, 0, W, H); this.parts = []; this.pops = []; this.glyphs = []; this.rings = []; this.live.clear(); this.banner = null; }
   setBanner(text, sub = '', life = 1.6, color = INK) { this.banner = { text, sub, t: 0, life, color }; }
   pop(x, y, text, color = INK, size = 26, life = 1.1) { this.pops.push({ x, y, text, color, size, t: 0, life }); }
   splash(x, y, els, n = 10, speed = 260, size = 4) {
@@ -141,6 +141,7 @@ export class PageLayer {
   ring(x, y, r, els, life = 0.5, width = 3) { this.rings.push({ x, y, r, c: elc(els), c2: elc(els, 1), t: 0, life, width }); }
 
   event(e) {
+    this.dirty = true;
     switch (e.type) {
       case 'cast':
         if (e.form !== 'beam') this.ring(e.x, e.y, e.form === 'wall' ? 60 : 40, e.els, 0.45, 2.5);
@@ -185,10 +186,8 @@ export class PageLayer {
       case 'fail': this.pop(e.x, e.y, e.reason === 'mana' ? 'not enough ink' : e.reason === 'silenced' ? 'silenced' : e.reason === 'echo' ? 'nothing to echo' : 'still drying', '#6b5a48', 20, 1); break;
     }
   }
-  liveInk(key, strokes) { if (strokes) this.live.set(key, strokes); else this.live.delete(key); }
-  glyphDone(strokes, mode, els) {
-    this.glyphs.push({ strokes: strokes.map(s => s.map(p => [...p])), mode, c: els ? elc(els) : '#6b5a48', t: 0, life: mode === 'cast' ? 0.7 : 0.9 });
-  }
+  // a cast rune soaks faintly into the paper
+  stamp(strokes, color, alpha = 0.16) { for (const s of strokes) brush(this.sg, s, color, alpha, 0.8); this.sg.globalAlpha = 1; this.dirty = true; }
   thumb(rune) {
     let c = this.thumbs.get(rune);
     if (!c) {
@@ -200,9 +199,13 @@ export class PageLayer {
   }
 
   // ---- the page texture ----
+  // returns true when the texture changed
   drawPage(S, dt) {
     const g = this.g; this.t += dt;
     this.shake = Math.max(0, this.shake - dt * 2.5);
+    const moving = this.rings.length || this.parts.length || (S && S.ents.some(e => e.k === 'sigil' || e.k === 'comet' || e.k === 'zone' || e.k === 'rain'));
+    if (!moving && !this.dirty) return false;
+    this.dirty = false;
     g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1;
     g.drawImage(this.paper, 0, 0);
     g.drawImage(this.stain, 0, 0);
@@ -212,7 +215,7 @@ export class PageLayer {
       else if (e.k === 'rain') { g.globalAlpha = 0.12; g.fillStyle = elc(e.els); g.beginPath(); g.arc(e.x, e.y, e.r, 0, 7); g.fill(); g.globalAlpha = 1; }
     }
     if (this.guide) {
-      const gd = this.guide, a = 0.25 + 0.15 * Math.sin(this.t * 4);
+      const gd = this.guide, a = 0.3;
       g.save(); g.setLineDash([10, 8]); drawGlyph(g, gd.strokes, gd.x - gd.size / 2, gd.y - gd.size / 2, gd.size, gd.c, 5); g.restore();
       g.globalAlpha = a; g.strokeStyle = gd.c; g.lineWidth = 2; g.beginPath(); g.arc(gd.x, gd.y, gd.size * 0.62, 0, 7); g.stroke(); g.globalAlpha = 1;
     }
@@ -228,18 +231,8 @@ export class PageLayer {
       if (p.t >= p.life) stampBlot(this.sg, p.x, p.y, p.r * 0.9, p.c, 0.28);
     }
     this.parts = this.parts.filter(p => p.t < p.life);
-    for (const gl of this.glyphs) {
-      gl.t += dt; const k = gl.t / gl.life;
-      if (gl.mode === 'cast') {
-        g.save(); g.shadowColor = gl.c; g.shadowBlur = 14 * (1 - k);
-        for (const s of gl.strokes) brush(g, s, gl.c, Math.max(0, 1 - k), 1 + k * 0.6);
-        g.restore();
-        for (const s of gl.strokes) brush(g, s, INK, Math.max(0, 0.9 - k * 2.2));
-      } else for (const s of gl.strokes) brush(g, s.map(p => [p[0] + (R() - 0.5) * 2, p[1] + k * k * 26, p[2]]), gl.c, Math.max(0, 0.8 - k * 0.9), 1 + k);
-    }
-    this.glyphs = this.glyphs.filter(gl => gl.t < gl.life);
-    for (const [, strokes] of this.live) for (const s of strokes) brush(g, s, INK, 0.95);
     g.globalAlpha = 1;
+    return true;
   }
   sigil(g, e) {
     const c = elc(e.els), c2 = elc(e.els, 1), k = Math.min(1, e.t / e.delay), t = this.t;
