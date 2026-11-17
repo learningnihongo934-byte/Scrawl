@@ -89,7 +89,7 @@ function hurtWiz(S, p, amount, els, x, y) {
 }
 
 // spec: { slot, cx, cy, w, h, ang, q, quick }  (page coords, q = neatness 0..1, ang null = face the enemy)
-// quick = hotkey cast: fixed spot, 70% power, never fuses
+// quick = hotkey cast: fixed spot, 70% power, never fuses. host = id of your own spell the drawing covered on screen
 export function cast(S, p, spec) {
   if (S.phase !== 'fight') return { ok: false, reason: 'wait' };
   const rune = S.loadouts[p]?.[spec.slot];
@@ -116,10 +116,12 @@ export function cast(S, p, spec) {
 
   // Fusion: draw a rune on top of one of your own spells
   let els = [rune.el], host = null;
-  for (const e of quick ? [] : S.ents) {
+  const FUSABLE = ['wall', 'sigil', 'comet', 'zone', 'rain', 'orb', 'totem', 'mine', 'fam'];
+  if (!quick && Number.isInteger(spec.host)) host = S.ents.find(e => e.id === spec.host && e.o === p && !e.dead && FUSABLE.includes(e.k)) || null;
+  for (const e of quick || host ? [] : S.ents) {
     if (e.o !== p || e.dead) continue;
     const d = e.k === 'wall' ? segDist(spec.cx, spec.cy, e) : hyp(spec.cx - e.x, spec.cy - e.y);
-    const reach = e.k === 'wall' ? 40 : (e.k === 'sigil' || e.k === 'comet' || e.k === 'zone' || e.k === 'rain') ? e.r * 0.8 : (e.k === 'orb' || e.k === 'totem' || e.k === 'mine' || e.k === 'fam') ? (e.r || 20) + 34 : -1;
+    const reach = e.k === 'wall' ? 60 : (e.k === 'sigil' || e.k === 'comet' || e.k === 'zone' || e.k === 'rain') ? e.r * 0.8 : (e.k === 'orb' || e.k === 'totem' || e.k === 'mine' || e.k === 'fam') ? (e.r || 20) + 34 : -1;
     if (d < reach) { host = e; break; }
   }
   if (host) {

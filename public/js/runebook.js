@@ -101,7 +101,8 @@ export function mountBook(root, getBook, setBook) {
   };
   pad.onpointermove = e => {
     if (!cur) return;
-    for (const ev of e.getCoalescedEvents?.() || [e]) {
+    const co = e.getCoalescedEvents?.();
+  for (const ev of co && co.length ? co : [e]) {
       const [x, y] = pos(ev), now = performance.now(), d = Math.hypot(x - last.x, y - last.y);
       if (d < 1.5) continue;
       const v = d / Math.max(1, now - last.t) * 1000;

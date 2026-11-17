@@ -181,7 +181,7 @@ function onNet(m) {
     case 'cast':
       if (mode !== 'host' || !S || !m.spec) return;
       cast(S, 1, { slot: num(m.spec.slot, 0, 5) | 0, cx: num(m.spec.cx, 0, W), cy: num(m.spec.cy, 0, H), w: num(m.spec.w, 0, W), h: num(m.spec.h, 0, H),
-        ang: typeof m.spec.ang === 'number' ? num(m.spec.ang, -4, 4) : null, q: num(m.spec.q, 0, 1), quick: !!m.spec.quick });
+        ang: typeof m.spec.ang === 'number' ? num(m.spec.ang, -4, 4) : null, q: num(m.spec.q, 0, 1), quick: !!m.spec.quick, host: Number.isInteger(m.spec.host) ? m.spec.host : null });
       break;
     case 'ink': {
       if (!Array.isArray(m.s) || m.s.length > 6) return;
@@ -208,8 +208,8 @@ function onNet(m) {
 }
 
 // ---------- casting ----------
-function sendCast(spec, rune, strokes) {
-  const end = (res, el) => { if (strokes) net?.send({ t: 'inkEnd', g: pen.g, res, el }); };
+function sendCast(spec, rune, strokes, last = true) {
+  const end = (res, el) => { if (strokes && last) net?.send({ t: 'inkEnd', g: pen.g, res, el }); };
   if (mode === 'guest') {
     const w = S.wiz[me], cost = runeCost(rune.form, spec.quick ? 1 : sizePower(spec.w, spec.h));
     const why = w.silenceT > 0 || w.shockT > 0 ? 'silenced' : w.cds[spec.slot] > 0 ? 'cd' : w.mana < cost ? 'mana' : null;
@@ -251,7 +251,8 @@ gl.onpointerdown = e => {
 };
 gl.onpointermove = e => {
   if (!pen.cur) return;
-  for (const ev of e.getCoalescedEvents?.() || [e]) {
+  const co = e.getCoalescedEvents?.();
+  for (const ev of co && co.length ? co : [e]) {
     const now = performance.now(), d = Math.hypot(ev.clientX - pen.last.x, ev.clientY - pen.last.y);
     if (d < 3) continue;
     const at = R.pick(ev.clientX, ev.clientY); if (!at) continue;
@@ -277,12 +278,26 @@ function finishRune() {
   if (!S || S.phase !== 'fight' || !strokes.length) { end('none'); return; }
   const sh = shapeOf(strokes.map(s => s.map(p => [p[0], p[1]])));
   if (sh.len < 26) { end('none'); return; }
-  const res = recognize(scr, activeTmpls);   // recognize what the player saw on screen, place it on the page
-  if (!res || res.slot < 0) {
+  // recognize what the player saw on screen; if the whole drawing isn't a rune, try it as two runes drawn back to back
+  let parts = null, split = null;
+  const whole = recognize(scr, activeTmpls);
+  if (whole && whole.slot >= 0) parts = [{ a: 0, b: strokes.length, res: whole }];
+  for (let k = 1; k < strokes.length; k++) {
+    const r1 = recognize(scr.slice(0, k), activeTmpls), r2 = recognize(scr.slice(k), activeTmpls);
+    if (r1 && r1.slot >= 0 && r2 && r2.slot >= 0 && (!split || r1.d + r2.d < split.d)) split = { d: r1.d + r2.d, parts: [{ a: 0, b: k, res: r1 }, { a: k, b: strokes.length, res: r2 }] };
+  }
+  // two clean runes beat one muddy one (a quick wall-then-bolt Ram); real two-stroke runes don't split cleanly
+  if (split && (!parts || split.d / 2 < whole.d - 0.08)) parts = split.parts;
+  if (!parts) {
     R.glyphDone(strokes, 'fizzle'); sfx('fizzle'); L.pop(sh.cx, sh.cy, 'fizzled', '#6b5a48', 22);
     end('fizzle'); return;
   }
-  sendCast({ slot: res.slot, cx: sh.cx, cy: sh.cy, w: sh.w, h: sh.h, ang: sh.ang, q: res.q }, S.loadouts[me][res.slot], strokes);
+  parts.forEach((pt, i) => {
+    const st = strokes.slice(pt.a, pt.b), sc = scr.slice(pt.a, pt.b), shp = shapeOf(st.map(s => s.map(p => [p[0], p[1]])));
+    const look = sc.flatMap(s => s.filter((_, j) => j % 4 === 0));   // screen points to look under for my own spells
+    const host = R.pickHost(look, me);
+    sendCast({ slot: pt.res.slot, cx: shp.cx, cy: shp.cy, w: shp.w, h: shp.h, ang: shp.ang, q: pt.res.q, host }, S.loadouts[me][pt.res.slot], st, i === parts.length - 1);
+  });
 }
 
 addEventListener('keydown', e => {

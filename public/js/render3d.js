@@ -305,7 +305,7 @@ export class Book3D {
     for (const e of S.ents) {
       seen.add(e.id);
       let o = this.ents.get(e.id);
-      if (!o) { o = this.makeEnt(e); this.ents.set(e.id, o); this.scene.add(o.g); }
+      if (!o) { o = this.makeEnt(e); o.g.userData = { id: e.id, o: e.o }; this.ents.set(e.id, o); this.scene.add(o.g); }
       this.updateEnt(o, e, dt);
     }
     for (const [id, o] of this.ents) if (!seen.has(id)) this.drop3d(id, o);
@@ -505,6 +505,20 @@ export class Book3D {
     this.ray.setFromCamera(v, this.cam);
     const hit = this.ray.intersectObject(this.page)[0];
     return hit ? [hit.uv.x * W, (1 - hit.uv.y) * H] : null;
+  }
+  // which of player p's spells do these screen points (client px) cover most? -> entity id or null
+  pickHost(points, p) {
+    const groups = [...this.ents.values()].filter(o => o.g.userData.o === p).map(o => o.g);
+    if (!groups.length) return null;
+    const r = this.gl.getBoundingClientRect(), tally = new Map();
+    for (const [cx, cy] of points) {
+      this.ray.setFromCamera(new THREE.Vector2((cx - r.left) / r.width * 2 - 1, -((cy - r.top) / r.height) * 2 + 1), this.cam);
+      const hit = this.ray.intersectObjects(groups, true)[0];
+      let o = hit?.object; while (o && o.userData.id === undefined) o = o.parent;
+      if (o) tally.set(o.userData.id, (tally.get(o.userData.id) || 0) + 1);
+    }
+    let best = null; for (const [id, n] of tally) if (!best || n > best.n) best = { id, n };
+    return best && best.n >= 2 ? best.id : null;
   }
   // client px -> overlay space (W x H)
   toOverlay(cx, cy) { const r = this.gl.getBoundingClientRect(); return [(cx - r.left) / r.width * W, (cy - r.top) / r.height * H]; }
