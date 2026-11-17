@@ -25,7 +25,7 @@ console.log(`scribbles rejected: ${rej}/60`);
 
 for (let lv = 0; lv < 3; lv++) {
   for (let m = 0; m < 3; m++) {
-    const S = newMatch([botLoadout(lv), botLoadout(lv)], ['A', 'B']);
+    const S = newMatch([botLoadout(lv), botLoadout(lv)], ["A", "B"]);
     const bots = [new Bot(lv, 0), new Bot(lv, 1)];
     let t = 0, casts = 0, fails = 0, fusions = 0;
     while (S.phase !== 'over' && t < 700) {

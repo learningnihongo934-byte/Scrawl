@@ -91,6 +91,6 @@ export function shapeOf(strokes) {
   for (const s of strokes) for (const [x, y] of s) { sxx += (x - mx) ** 2; syy += (y - my) ** 2; sxy += (x - mx) * (y - my); }
   const w = maxX - minX, h = maxY - minY;
   const elong = Math.max(w, h) / (Math.min(w, h) + 1);
-  const ang = elong > 1.6 ? 0.5 * Math.atan2(2 * sxy, sxx - syy) : Math.PI / 2;
+  const ang = elong > 1.6 ? 0.5 * Math.atan2(2 * sxy, sxx - syy) : null;   // null = let the wall face the enemy
   return { cx: (minX + maxX) / 2, cy: (minY + maxY) / 2, w, h, ang, len };
 }

@@ -1,5 +1,6 @@
-// Scrawl renderer: parchment page, ink strokes, wizards, spells, splatter, HUD. Canvas 2D, all drawn in code.
-import { W, H, MID, WIZ_R, EL, FORMS, MAX_HP, MAX_MANA } from './data.js';
+// Scrawl 2D layers: the parchment page texture (ink, stains, sigil circles, splatter) that the 3D book shows,
+// and the HUD overlay (life, ink, runes, timer, pops, banners). Canvas 2D, all drawn in code.
+import { W, H, EL, FORMS, MAX_HP, MAX_MANA } from './data.js';
 import { wallEnds, runeCost } from './sim.js';
 
 export const INK = '#2a2017';
@@ -104,22 +105,30 @@ function stampBlot(g, x, y, r, c, alpha) {
   g.globalAlpha = 1;
 }
 
-export class Renderer {
-  constructor(canvas) {
-    this.cv = canvas; this.g = canvas.getContext('2d');
+const STATUS = [
+  ['burnT', 'burning', '#b0391d'], ['chillT', 'chilled', '#2c5d8c'], ['shockT', 'shocked', '#6b4c9c'], ['windT', 'winded', '#3f8580'],
+  ['dazzleT', 'dazzled', '#b8840f'], ['hexT', 'hexed', '#4d2c55'], ['markT', 'marked', '#8e2b1e'], ['silenceT', 'silenced', '#2a2017'],
+  ['hasteT', 'hasted', '#3f8580'], ['regenT', 'mending', '#3c6d37'], ['leechT', 'leeching', '#3c6d37'],
+];
+export function statusList(w) {
+  const out = STATUS.filter(([k]) => w[k] > 0).map(([, n, c]) => [n, c]);
+  if (w.poisonN > 0) out.splice(1, 0, [`poison ×${w.poisonN}`, '#6a7f1c']);
+  if (w.thorns && w.shield > 0) out.push(['thorns', '#7d5a22']);
+  return out;
+}
+
+// The page texture (what the 3D book shows) plus the HUD overlay.
+export class PageLayer {
+  constructor() {
+    this.cv = document.createElement('canvas'); this.cv.width = W; this.cv.height = H;
+    this.g = this.cv.getContext('2d');
     this.paper = makeParchment();
     this.stain = document.createElement('canvas'); this.stain.width = W; this.stain.height = H;
     this.sg = this.stain.getContext('2d');
+    this.slip = makeParchment(320, 160, false);
     this.parts = []; this.pops = []; this.glyphs = []; this.rings = []; this.live = new Map();
-    this.shake = 0; this.flip = false; this.scale = 1; this.banner = null; this.thumbs = new WeakMap(); this.t = 0;
-    this.resize();
+    this.banner = null; this.thumbs = new WeakMap(); this.t = 0; this.guide = null; this.shake = 0;
   }
-  resize() {
-    const r = this.cv.getBoundingClientRect(), dpr = Math.min(2, window.devicePixelRatio || 1);
-    this.cv.width = Math.max(320, Math.round(r.width * dpr)); this.cv.height = Math.round(this.cv.width * H / W);
-    this.scale = this.cv.width / W;
-  }
-  X(x) { return this.flip ? W - x : x; }
   reset() { this.sg.clearRect(0, 0, W, H); this.parts = []; this.pops = []; this.glyphs = []; this.rings = []; this.live.clear(); this.banner = null; }
   setBanner(text, sub = '', life = 1.6, color = INK) { this.banner = { text, sub, t: 0, life, color }; }
   pop(x, y, text, color = INK, size = 26, life = 1.1) { this.pops.push({ x, y, text, color, size, t: 0, life }); }
@@ -131,58 +140,55 @@ export class Renderer {
   }
   ring(x, y, r, els, life = 0.5, width = 3) { this.rings.push({ x, y, r, c: elc(els), c2: elc(els, 1), t: 0, life, width }); }
 
-  // turn sim events into ink effects
   event(e) {
     switch (e.type) {
       case 'cast':
-        this.ring(e.x, e.y, e.form === 'wall' ? 60 : 40, e.els, 0.45, 2.5);
-        this.splash(e.x, e.y, e.els, 6, 140, 3);
-        if (e.fused) this.pop(e.x, e.y - 44, e.fused + (e.ram ? ' Ram!' : '!'), elc(e.els), 30, 1.4);
-        else if (e.chain >= 2) this.pop(e.x, e.y - 40, `Flourish ×${(1 + 0.08 * e.chain).toFixed(2)}`, INK, 20, 0.9);
+        if (e.form !== 'beam') this.ring(e.x, e.y, e.form === 'wall' ? 60 : 40, e.els, 0.45, 2.5);
+        if (e.fused) this.pop(e.x, e.y, e.fused + (e.ram ? ' Ram!' : '!'), elc(e.els), 32, 1.4);
+        else if (e.echoed) this.pop(e.x, e.y, `Echo: ${FORMS[e.echoed].name}`, elc(e.els), 22, 1);
+        else if (e.chain >= 2) this.pop(e.x, e.y, `Flourish ×${(1 + 0.08 * e.chain).toFixed(2)}`, INK, 20, 0.9);
         break;
       case 'hit':
         if (e.amt > 0) {
-          this.splash(e.x, e.y, e.els, 8 + Math.min(20, e.amt), 320, 5);
           stampBlot(this.sg, e.x + (R() - 0.5) * 30, e.y + (R() - 0.5) * 30, 6 + Math.min(18, e.amt * 0.6), elc(e.els), 0.32);
-          this.pop(e.x, e.y - 30, `−${e.amt}`, HP_INK, 22 + Math.min(16, e.amt * 0.6));
-          this.shake = Math.min(14, this.shake + e.amt * 0.45);
+          this.pop(e.x, e.y, `−${e.amt}`, HP_INK, 24 + Math.min(16, e.amt * 0.6));
+          this.shake = Math.min(1, this.shake + e.amt * 0.03);
         }
-        if (e.shielded > 0) this.pop(e.x, e.y - 58, `(${e.shielded} warded)`, MANA_INK, 17);
+        if (e.shielded > 0) this.pop(e.x, e.y - 30, `(${e.shielded} warded)`, MANA_INK, 18);
         break;
       case 'wallhit': this.splash(e.x, e.y, e.els, 6, 180, 3); stampBlot(this.sg, e.x, e.y, 5, elc(e.els), 0.18); break;
-      case 'pierce': this.ring(e.x, e.y, 26, e.els, 0.3, 2); break;
-      case 'clash':
-        this.splash(e.x, e.y, e.els, 14, 300, 4); this.ring(e.x, e.y, 34, e.els, 0.35, 3);
-        stampBlot(this.sg, e.x, e.y, 9, elc(e.els), 0.22); this.shake = Math.min(10, this.shake + 3);
-        break;
+      case 'pierce': case 'reflect': this.ring(e.x, e.y, 26, e.els, 0.3, 2); if (e.type === 'reflect') this.pop(e.x, e.y, 'reflected', elc(e.els), 18, 0.8); break;
+      case 'clash': this.splash(e.x, e.y, e.els, 14, 300, 4); this.ring(e.x, e.y, 34, e.els, 0.35, 3); stampBlot(this.sg, e.x, e.y, 9, elc(e.els), 0.22); this.shake = Math.min(1, this.shake + 0.15); break;
       case 'wallbreak': {
         const [ax, ay, bx, by] = wallEnds(e);
         for (let i = 0; i <= 6; i++) this.splash(ax + (bx - ax) * i / 6, ay + (by - ay) * i / 6, e.els, 3, 200, 4);
-        this.pop(e.x, e.y - 20, 'broken', INK, 18);
         break;
       }
       case 'blast': {
-        this.ring(e.x, e.y, e.r, e.els, 0.6, 6);
-        this.splash(e.x, e.y, e.els, 30, 420, 5);
+        this.ring(e.x, e.y, e.r, e.els, 0.6, 6); this.splash(e.x, e.y, e.els, e.small ? 12 : 30, 420, 5);
         const gr = this.sg.createRadialGradient(e.x, e.y, 0, e.x, e.y, e.r);
-        gr.addColorStop(0, 'rgba(60,35,15,0.20)'); gr.addColorStop(0.7, 'rgba(60,35,15,0.07)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+        gr.addColorStop(0, 'rgba(60,35,15,0.22)'); gr.addColorStop(0.7, 'rgba(60,35,15,0.07)'); gr.addColorStop(1, 'rgba(0,0,0,0)');
         this.sg.fillStyle = gr; this.sg.beginPath(); this.sg.arc(e.x, e.y, e.r, 0, 7); this.sg.fill();
         stampBlot(this.sg, e.x, e.y, e.r * 0.18, elc(e.els), 0.3);
-        this.shake = Math.min(14, this.shake + 7);
+        this.shake = Math.min(1, this.shake + (e.comet ? 0.9 : 0.5));
         break;
       }
+      case 'beam': {
+        const g = this.sg; g.strokeStyle = elc(e.els); g.globalAlpha = 0.25; g.lineWidth = 6; g.lineCap = 'round';
+        g.beginPath(); g.moveTo(e.x1, e.y1); g.lineTo(e.x2, e.y2); g.stroke(); g.globalAlpha = 1;
+        this.splash(e.x2, e.y2, e.els, 10, 260, 4);
+        break;
+      }
+      case 'curse': this.pop(e.x, e.y, FORMS[e.form].name.toLowerCase() + (e.form === 'leech' ? '' : 'ed'), elc(e.els), 24, 1.2); break;
+      case 'buff': this.pop(e.x ?? 0, e.y ?? 0, '', INK, 1, 0.01); break;
       case 'fade': this.splash(e.x, e.y, e.els, 5, 90, 3); break;
-      case 'fail': this.pop(e.x, e.y - 30, e.reason === 'mana' ? 'not enough ink' : 'still drying', '#6b5a48', 19, 1); break;
+      case 'fail': this.pop(e.x, e.y, e.reason === 'mana' ? 'not enough ink' : e.reason === 'silenced' ? 'silenced' : e.reason === 'echo' ? 'nothing to echo' : 'still drying', '#6b5a48', 20, 1); break;
     }
   }
-
-  // ink being drawn right now: key -> { strokes: [[[x,y,w]...]...] }
   liveInk(key, strokes) { if (strokes) this.live.set(key, strokes); else this.live.delete(key); }
-  // a finished glyph that turns into its element colour (cast) or smears away (fizzle)
   glyphDone(strokes, mode, els) {
     this.glyphs.push({ strokes: strokes.map(s => s.map(p => [...p])), mode, c: els ? elc(els) : '#6b5a48', t: 0, life: mode === 'cast' ? 0.7 : 0.9 });
   }
-
   thumb(rune) {
     let c = this.thumbs.get(rune);
     if (!c) {
@@ -193,38 +199,35 @@ export class Renderer {
     return c;
   }
 
-  frame(S, view, dt) {
+  // ---- the page texture ----
+  drawPage(S, dt) {
     const g = this.g; this.t += dt;
-    this.shake = Math.max(0, this.shake - dt * 30);
-    const sx = (R() - 0.5) * this.shake, sy = (R() - 0.5) * this.shake;
-    g.setTransform(this.scale, 0, 0, this.scale, 0, 0);
-    g.globalAlpha = 1;
+    this.shake = Math.max(0, this.shake - dt * 2.5);
+    g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1;
     g.drawImage(this.paper, 0, 0);
-    g.save(); g.translate(sx, sy);
-    if (this.flip) { g.translate(W, 0); g.scale(-1, 1); }
     g.drawImage(this.stain, 0, 0);
-    if (S) {
-      for (const e of S.ents) if (e.k === 'wall') this.wall(g, e);
-      for (const e of S.ents) if (e.k === 'sigil') this.sigil(g, e);
-      for (let p = 0; p < 2; p++) this.wizard(g, S, p, view);
-      for (const e of S.ents) if (e.k === 'orb') this.orb(g, e);
-      for (const e of S.ents) if (e.k === 'bolt') this.bolt(g, e);
+    if (S) for (const e of S.ents) {
+      if (e.k === 'sigil' || e.k === 'comet') this.sigil(g, e);
+      else if (e.k === 'zone') this.zone(g, e);
+      else if (e.k === 'rain') { g.globalAlpha = 0.12; g.fillStyle = elc(e.els); g.beginPath(); g.arc(e.x, e.y, e.r, 0, 7); g.fill(); g.globalAlpha = 1; }
     }
-    // rings
+    if (this.guide) {
+      const gd = this.guide, a = 0.25 + 0.15 * Math.sin(this.t * 4);
+      g.save(); g.setLineDash([10, 8]); drawGlyph(g, gd.strokes, gd.x - gd.size / 2, gd.y - gd.size / 2, gd.size, gd.c, 5); g.restore();
+      g.globalAlpha = a; g.strokeStyle = gd.c; g.lineWidth = 2; g.beginPath(); g.arc(gd.x, gd.y, gd.size * 0.62, 0, 7); g.stroke(); g.globalAlpha = 1;
+    }
     for (const r of this.rings) {
       r.t += dt; const k = r.t / r.life;
       g.globalAlpha = Math.max(0, 1 - k); g.strokeStyle = r.c; g.lineWidth = r.width * (1 - k * 0.6);
       g.beginPath(); g.arc(r.x, r.y, r.r * (0.6 + k * 0.6), 0, 7); g.stroke();
     }
     this.rings = this.rings.filter(r => r.t < r.life);
-    // flying ink drops, stamped onto the page when they land
     for (const p of this.parts) {
       p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 1 - dt * 4; p.vy *= 1 - dt * 4;
       g.globalAlpha = 1; g.fillStyle = p.c; g.beginPath(); g.arc(p.x, p.y, p.r, 0, 7); g.fill();
       if (p.t >= p.life) stampBlot(this.sg, p.x, p.y, p.r * 0.9, p.c, 0.28);
     }
     this.parts = this.parts.filter(p => p.t < p.life);
-    // glyphs settling into spells
     for (const gl of this.glyphs) {
       gl.t += dt; const k = gl.t / gl.life;
       if (gl.mode === 'cast') {
@@ -232,221 +235,139 @@ export class Renderer {
         for (const s of gl.strokes) brush(g, s, gl.c, Math.max(0, 1 - k), 1 + k * 0.6);
         g.restore();
         for (const s of gl.strokes) brush(g, s, INK, Math.max(0, 0.9 - k * 2.2));
-      } else {
-        for (const s of gl.strokes) brush(g, s.map(p => [p[0] + (R() - 0.5) * 2, p[1] + k * k * 26, p[2]]), gl.c, Math.max(0, 0.8 - k * 0.9), 1 + k);
-      }
+      } else for (const s of gl.strokes) brush(g, s.map(p => [p[0] + (R() - 0.5) * 2, p[1] + k * k * 26, p[2]]), gl.c, Math.max(0, 0.8 - k * 0.9), 1 + k);
     }
     this.glyphs = this.glyphs.filter(gl => gl.t < gl.life);
     for (const [, strokes] of this.live) for (const s of strokes) brush(g, s, INK, 0.95);
-    g.restore();
-    g.globalAlpha = 1;
-
-    if (S) this.hud(g, S, view);
-    // pops
-    for (const p of this.pops) {
-      p.t += dt; const k = p.t / p.life;
-      g.globalAlpha = Math.max(0, 1 - k * k); g.fillStyle = p.color; g.font = `italic ${p.size}px ${FELL}`; g.textAlign = 'center';
-      g.fillText(p.text, this.X(p.x), p.y - k * 30);
-    }
-    this.pops = this.pops.filter(p => p.t < p.life);
-    if (this.banner) {
-      const b = this.banner; b.t += dt; const k = b.t / b.life;
-      const a = k < 0.15 ? k / 0.15 : k > 0.75 ? Math.max(0, (1 - k) / 0.25) : 1;
-      g.globalAlpha = a; g.textAlign = 'center'; g.fillStyle = b.color;
-      g.font = `${96 + (1 - Math.min(1, k * 4)) * 30}px ${FELL_SC}`; g.fillText(b.text, W / 2, H / 2 + 10);
-      if (b.sub) { g.font = `italic 30px ${FELL}`; g.fillText(b.sub, W / 2, H / 2 + 58); }
-      if (b.t > b.life) this.banner = null;
-    }
     g.globalAlpha = 1;
   }
-
-  wizard(g, S, p, view) {
-    const w = S.wiz[p], f = p === 0 ? 1 : -1, t = this.t;
-    const mine = p === view.me, ink = SIDE_INK[mine ? 0 : 1];
-    const bob = Math.sin(t * 2.4 + p * 2) * 2.5, y = w.y + bob, x = w.x;
-    g.save(); g.translate(x, y); g.scale(f, 1);
-    if (w.hurtT > 0) g.translate((R() - 0.5) * 6, 0);
-    g.globalAlpha = 1; g.lineCap = 'round'; g.lineJoin = 'round';
-    // shadow
-    g.fillStyle = 'rgba(60,40,20,0.18)'; g.beginPath(); g.ellipse(0, 46, 34, 7, 0, 0, 7); g.fill();
-    // robe with hatching
-    g.beginPath(); g.moveTo(-14, -8); g.quadraticCurveTo(-22, 20, -30, 44); g.lineTo(30, 44); g.quadraticCurveTo(20, 18, 14, -8); g.closePath();
-    g.fillStyle = 'rgba(231,214,176,0.9)'; g.fill();
-    g.save(); g.clip(); g.strokeStyle = ink; g.globalAlpha = 0.45; g.lineWidth = 1.3;
-    for (let i = -60; i < 60; i += 7) { g.beginPath(); g.moveTo(i, 50); g.lineTo(i + 40, -12); g.stroke(); }
-    g.restore();
-    g.strokeStyle = INK; g.lineWidth = 2.6; g.globalAlpha = 1;
-    g.beginPath(); g.moveTo(-14, -8); g.quadraticCurveTo(-22, 20, -30, 44); g.quadraticCurveTo(0, 49, 30, 44); g.quadraticCurveTo(20, 18, 14, -8); g.stroke();
-    // sash
-    g.strokeStyle = ink; g.lineWidth = 4; g.beginPath(); g.moveTo(-17, 12); g.quadraticCurveTo(0, 17, 18, 11); g.stroke();
-    // head
-    g.fillStyle = PAPER; g.strokeStyle = INK; g.lineWidth = 2.4;
-    g.beginPath(); g.arc(2, -18, 11, 0, 7); g.fill(); g.stroke();
-    g.fillStyle = INK; g.beginPath(); g.arc(7, -19, 1.8, 0, 7); g.fill();
-    // beard
-    g.beginPath(); g.moveTo(-2, -10); g.quadraticCurveTo(6, 6, 12, -10); g.stroke();
-    // hat
-    g.fillStyle = ink; g.beginPath(); g.moveTo(-20, -24); g.quadraticCurveTo(-4, -30, 22, -25);
-    g.lineTo(10, -32); g.quadraticCurveTo(2, -58, -16, -74); g.quadraticCurveTo(-6, -52, -10, -31); g.closePath(); g.fill();
-    g.strokeStyle = INK; g.lineWidth = 2.2; g.stroke();
-    // staff, raised while casting
-    const lift = w.castT > 0 ? Math.sin((w.castT / 0.4) * Math.PI) * 14 : 0;
-    g.lineWidth = 3.2; g.strokeStyle = '#4a3420'; g.beginPath(); g.moveTo(26, 46 - lift); g.lineTo(31, -42 - lift); g.stroke();
-    g.fillStyle = w.castT > 0 ? HP_INK : INK; g.beginPath(); g.arc(31, -46 - lift, 4.5, 0, 7); g.fill();
-    g.restore();
-    // shield ward
-    if (w.shield > 0) {
-      const k = Math.min(1, w.shield / Math.max(1, w.shieldMax)), c = elc(w.shieldEls);
-      g.save(); g.translate(x, w.y); g.rotate(t * 0.8 * f);
-      g.strokeStyle = c; g.globalAlpha = 0.35 + 0.5 * k; g.lineWidth = 2 + 4 * k; g.setLineDash([16, 9]);
-      g.beginPath(); g.arc(0, -6, WIZ_R + 22, 0, 7); g.stroke();
-      g.setLineDash([]); g.lineWidth = 1; g.globalAlpha = 0.25; g.beginPath(); g.arc(0, -6, WIZ_R + 28, 0, 7); g.stroke();
-      g.restore();
-    }
-    // status scribbles
-    if (w.burnT > 0) {
-      g.strokeStyle = EL.fire.ink; g.lineWidth = 2; g.globalAlpha = 0.85;
-      for (let i = 0; i < 3; i++) { const bx = x - 14 + i * 14, by = y - 80 - Math.abs(Math.sin(t * 9 + i)) * 8; g.beginPath(); g.moveTo(bx, by + 12); g.quadraticCurveTo(bx + 6, by + 4, bx, by - 4); g.stroke(); }
-    }
-    if (w.chillT > 0) {
-      g.strokeStyle = EL.frost.ink; g.lineWidth = 1.6; g.globalAlpha = 0.85;
-      for (let i = 0; i < 3; i++) {
-        const cx = x - 20 + i * 20, cy = y + 58 + Math.sin(t * 3 + i) * 3;
-        for (let k = 0; k < 3; k++) { const a = k * Math.PI / 3; g.beginPath(); g.moveTo(cx - Math.cos(a) * 5, cy - Math.sin(a) * 5); g.lineTo(cx + Math.cos(a) * 5, cy + Math.sin(a) * 5); g.stroke(); }
-      }
-    }
-    g.globalAlpha = 1;
-  }
-
-  bolt(g, e) {
-    const c = elc(e.els), c2 = elc(e.els, 1), dir = Math.sign(e.vx) || 1, r = e.r, t = this.t;
-    const ang = Math.atan2(e.vy, e.vx);
-    g.save(); g.translate(e.x, e.y); g.rotate(ang); g.lineCap = 'round';
-    const storm = e.els.includes('storm');
-    for (let i = 0; i < 4; i++) {
-      const len = r * (3 + i * 1.3), w1 = Math.sin(t * 18 + e.id + i * 1.7) * r * 0.4;
-      g.strokeStyle = i % 2 ? c2 : c; g.globalAlpha = 0.6 - i * 0.12; g.lineWidth = Math.max(1, r * (0.9 - i * 0.18));
-      g.beginPath(); g.moveTo(0, (i - 1.5) * r * 0.22);
-      if (storm) { for (let k = 1; k <= 4; k++) g.lineTo(-len * k / 4, (k % 2 ? 1 : -1) * r * 0.6 + w1 * 0.3); }
-      else g.quadraticCurveTo(-len * 0.5, w1, -len, w1 * 1.6);
-      g.stroke();
-    }
-    g.globalAlpha = 1; g.fillStyle = c;
-    if (e.els.includes('earth')) { g.beginPath(); for (let k = 0; k < 7; k++) { const a = k / 7 * Math.PI * 2 + e.id, rr = r * (0.8 + 0.25 * ((k * 7 + e.id) % 3) / 2); g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } g.closePath(); g.fill(); }
-    else if (e.els.includes('frost')) { g.beginPath(); g.moveTo(r * 1.5, 0); g.lineTo(-r * 0.6, -r * 0.8); g.lineTo(-r * 0.2, 0); g.lineTo(-r * 0.6, r * 0.8); g.closePath(); g.fill(); }
-    else { blotPath(g, 0, 0, r, e.id, t); g.fill(); }
-    if (e.els.includes('void')) { g.fillStyle = PAPER; g.beginPath(); g.arc(0, 0, r * 0.45, 0, 7); g.fill(); }
-    if (e.els.includes('life')) { g.strokeStyle = PAPER; g.lineWidth = 1.5; g.beginPath(); g.moveTo(-r * 0.6, 0); g.lineTo(r * 0.6, 0); g.stroke(); }
-    if (e.els.includes('fire')) { g.fillStyle = c2 === c ? '#d8722c' : c2; g.globalAlpha = 0.8; blotPath(g, r * 0.2, 0, r * 0.5, e.id + 3, t * 2); g.fill(); }
-    if (e.ram) { g.strokeStyle = INK; g.lineWidth = 1.5; g.globalAlpha = 0.6; for (let k = -r; k < r; k += 7) { g.beginPath(); g.moveTo(k, -r * 0.7); g.lineTo(k + 6, r * 0.7); g.stroke(); } }
-    g.restore(); g.globalAlpha = 1;
-    void dir;
-  }
-
-  wall(g, e) {
-    const [ax, ay, bx, by] = wallEnds(e), c = elc(e.els), c2 = elc(e.els, 1);
-    const f = Math.max(0.2, e.hp / e.maxhp), fade = Math.min(1, (e.life - e.t) / 0.8, e.t / 0.15);
-    g.lineCap = 'round';
-    g.globalAlpha = (0.3 + 0.6 * f) * fade; g.strokeStyle = c; g.lineWidth = 15;
-    g.beginPath(); g.moveTo(ax, ay); g.lineTo(bx, by); g.stroke();
-    const nx = -(by - ay) / e.len, ny = (bx - ax) / e.len, n = Math.floor(e.len / 11);
-    g.lineWidth = 2; g.globalAlpha = 0.85 * fade;
-    for (let i = 0; i <= n; i++) {
-      const k = i / n, px = ax + (bx - ax) * k, py = ay + (by - ay) * k, l = 11 + (i % 3) * 3;
-      g.strokeStyle = i % 2 ? c2 : INK;
-      g.beginPath(); g.moveTo(px - nx * l, py - ny * l); g.lineTo(px + nx * l + (bx - ax) / e.len * 5, py + ny * l + (by - ay) / e.len * 5); g.stroke();
-    }
-    if (f < 0.6) {
-      g.strokeStyle = PAPER; g.lineWidth = 2; g.globalAlpha = fade;
-      for (let i = 1; i <= 2; i++) { const k = i / 3, px = ax + (bx - ax) * k, py = ay + (by - ay) * k; g.beginPath(); g.moveTo(px - nx * 9, py - ny * 9); g.lineTo(px + 4, py - 3); g.lineTo(px + nx * 9, py + ny * 9); g.stroke(); }
-    }
-    g.globalAlpha = 1;
-  }
-
   sigil(g, e) {
     const c = elc(e.els), c2 = elc(e.els, 1), k = Math.min(1, e.t / e.delay), t = this.t;
     g.save(); g.translate(e.x, e.y);
-    g.globalAlpha = 0.07 + 0.18 * k; g.fillStyle = c; g.beginPath(); g.arc(0, 0, e.r, 0, 7); g.fill();
+    g.globalAlpha = 0.07 + 0.2 * k; g.fillStyle = c; g.beginPath(); g.arc(0, 0, e.r, 0, 7); g.fill();
     g.globalAlpha = 0.9; g.strokeStyle = c; g.lineWidth = 3;
     g.beginPath(); g.arc(0, 0, e.r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * k); g.stroke();
     g.rotate(t * 0.6); g.strokeStyle = c2; g.lineWidth = 1.5; g.setLineDash([6, 6]);
     g.beginPath(); g.arc(0, 0, e.r * 0.62, 0, 7); g.stroke(); g.setLineDash([]);
     g.strokeStyle = INK; g.lineWidth = 1.6;
-    for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; if (i / 6 > k) break; g.beginPath(); g.moveTo(Math.cos(a) * e.r * 0.62, Math.sin(a) * e.r * 0.62); g.lineTo(Math.cos(a) * e.r * 0.95, Math.sin(a) * e.r * 0.95); g.stroke(); }
-    g.beginPath(); for (let i = 0; i <= 5; i++) { const a = i * Math.PI * 4 / 5 - Math.PI / 2; g.lineTo(Math.cos(a) * e.r * 0.3, Math.sin(a) * e.r * 0.3); } g.stroke();
+    for (let i = 0; i < 6; i++) { if (i / 6 > k) break; const a = i / 6 * Math.PI * 2; g.beginPath(); g.moveTo(Math.cos(a) * e.r * 0.62, Math.sin(a) * e.r * 0.62); g.lineTo(Math.cos(a) * e.r * 0.95, Math.sin(a) * e.r * 0.95); g.stroke(); }
+    if (e.k === 'comet') { g.globalAlpha = 0.6; g.beginPath(); g.moveTo(-e.r * 0.3, 0); g.lineTo(e.r * 0.3, 0); g.moveTo(0, -e.r * 0.3); g.lineTo(0, e.r * 0.3); g.stroke(); }
+    else { g.beginPath(); for (let i = 0; i <= 5; i++) { const a = i * Math.PI * 4 / 5 - Math.PI / 2; g.lineTo(Math.cos(a) * e.r * 0.3, Math.sin(a) * e.r * 0.3); } g.stroke(); }
+    g.restore(); g.globalAlpha = 1;
+  }
+  zone(g, e) {
+    const c = elc(e.els), fade = Math.min(1, (e.life - e.t) / 0.6, e.t / 0.2), t = this.t;
+    g.save(); g.translate(e.x, e.y); g.globalAlpha = 0.16 * fade; g.fillStyle = c; g.beginPath(); g.arc(0, 0, e.r, 0, 7); g.fill();
+    g.globalAlpha = 0.7 * fade; g.strokeStyle = c; g.lineWidth = 2;
+    if (e.z === 'vortex') {
+      g.rotate(-t * 3);
+      for (let k = 0; k < 3; k++) { g.beginPath(); for (let i = 0; i < 30; i++) { const a = i / 30 * Math.PI * 2 + k * 2.1, r = e.r * (1 - i / 32); g.lineTo(Math.cos(a) * r, Math.sin(a) * r); } g.stroke(); }
+    } else {
+      for (let i = 0; i < 7; i++) { const a = i * 2.4 + t * 0.4, r = e.r * (0.3 + (i % 3) * 0.22); g.beginPath(); g.ellipse(Math.cos(a) * r, Math.sin(a) * r * 0.6, 14, 6, 0, 0, 7); g.stroke(); }
+    }
     g.restore(); g.globalAlpha = 1;
   }
 
-  orb(g, e) {
-    const c = elc(e.els), c2 = elc(e.els, 1), t = this.t;
-    g.save(); g.translate(e.x, e.y);
-    g.globalAlpha = 0.25; g.fillStyle = c; g.beginPath(); g.arc(0, 0, e.r * 1.3, 0, 7); g.fill();
-    g.globalAlpha = 1; g.strokeStyle = c; g.lineWidth = 3; g.beginPath(); g.arc(0, 0, e.r, 0, 7); g.stroke();
-    g.rotate(t * 4 + e.id); g.strokeStyle = c2; g.lineWidth = 2;
-    g.beginPath(); for (let i = 0; i < 30; i++) { const a = i / 30 * Math.PI * 3, rr = e.r * 0.9 * (1 - i / 30); g.lineTo(Math.cos(a) * rr, Math.sin(a) * rr); } g.stroke();
-    g.restore();
-    g.fillStyle = c; g.globalAlpha = 0.5;
-    for (let i = 1; i <= 3; i++) { g.beginPath(); g.arc(e.x - e.vx * 0.04 * i, e.y - e.vy * 0.04 * i, e.r * 0.3 / i, 0, 7); g.fill(); }
+  // ---- overlay: HUD, floating numbers, banners. project(x, y) -> [sx, sy] in W x H screen space ----
+  drawOverlay(g, S, view, dt, project) {
+    g.setTransform(g.canvas.width / W, 0, 0, g.canvas.width / W, 0, 0);
+    g.clearRect(0, 0, W, H);
+    if (S) this.hud(g, S, view);
+    for (const p of this.pops) {
+      p.t += dt; const k = p.t / p.life;
+      const at = project(p.x, p.y); if (!at) continue;
+      g.globalAlpha = Math.max(0, 1 - k * k); g.textAlign = 'center'; g.font = `italic ${p.size}px ${FELL}`;
+      g.lineWidth = 4; g.strokeStyle = 'rgba(241,228,196,0.9)'; g.strokeText(p.text, at[0], at[1] - 40 - k * 40);
+      g.fillStyle = p.color; g.fillText(p.text, at[0], at[1] - 40 - k * 40);
+    }
+    this.pops = this.pops.filter(p => p.t < p.life);
+    if (this.banner) {
+      const b = this.banner; b.t += dt; const k = b.t / b.life;
+      const a = k < 0.15 ? k / 0.15 : k > 0.75 ? Math.max(0, (1 - k) / 0.25) : 1;
+      g.globalAlpha = a * 0.92; this.slipAt(g, W / 2 - 330, H / 2 - 110, 660, b.sub ? 190 : 150);
+      g.globalAlpha = a; g.textAlign = 'center'; g.fillStyle = b.color;
+      g.font = `${92 + (1 - Math.min(1, k * 4)) * 26}px ${FELL_SC}`; g.fillText(b.text, W / 2, H / 2 + 6);
+      if (b.sub) { g.font = `italic 26px ${FELL}`; g.fillText(b.sub, W / 2, H / 2 + 52); }
+      if (b.t > b.life) this.banner = null;
+    }
     g.globalAlpha = 1;
   }
-
+  slipAt(g, x, y, w, h) {
+    const a = g.globalAlpha;
+    g.fillStyle = 'rgba(10,6,3,0.45)'; g.fillRect(x + 5, y + 6, w, h);
+    g.globalAlpha = a; g.drawImage(this.slip, x, y, w, h);
+    g.strokeStyle = INK; g.lineWidth = 1.4; roughRect(g, x, y, w, h, 0.6);
+  }
+  // rune cells of the player's own strip, in overlay space (for tap-to-quick-cast)
+  cells(n = 6) {
+    const sz = 64, gap = 74, y0 = H - 30 - sz;
+    return Array.from({ length: n }, (_, i) => ({ x: 60 + i * gap, y: y0, w: sz, h: sz }));
+  }
   hud(g, S, view) {
-    const left = this.flip ? 1 : 0;
+    const me = view.me;
     for (const side of [0, 1]) {
-      const p = side === 0 ? left : 1 - left, w = S.wiz[p];
-      const bx = side === 0 ? 56 : W - 56 - 400, al = side === 0 ? 'left' : 'right', nx = side === 0 ? 56 : W - 56;
-      g.textAlign = al; g.fillStyle = SIDE_INK[p === view.me ? 0 : 1]; g.font = `italic 28px ${FELL}`;
-      g.fillText(S.names?.[p] || (p ? 'Rival' : 'You'), nx, 66);
-      // wax seals for rounds won
+      const p = side === 0 ? me : 1 - me, w = S.wiz[p];
+      const bx = side === 0 ? 60 : W - 60 - 380, al = side === 0 ? 'left' : 'right', nx = side === 0 ? 60 : W - 60;
+      this.slipAt(g, bx - 22, 18, 424, 128);
+      g.textAlign = al; g.fillStyle = SIDE_INK[side]; g.font = `italic 27px ${FELL}`;
+      g.fillText(S.names?.[p] || (side ? 'Rival' : 'You'), nx, 52);
       for (let i = 0; i < 2; i++) {
         const cx = side === 0 ? nx + 300 + i * 30 : nx - 300 - i * 30;
-        g.globalAlpha = 1; g.strokeStyle = '#7a2418'; g.lineWidth = 1.6; g.beginPath(); g.arc(cx, 57, 11, 0, 7);
+        g.globalAlpha = 1; g.strokeStyle = '#7a2418'; g.lineWidth = 1.6; g.beginPath(); g.arc(cx, 44, 11, 0, 7);
         if (S.wins[p] > i) { g.fillStyle = '#9a2a1c'; g.fill(); g.strokeStyle = '#5c160c'; }
         g.stroke();
       }
-      // health ribbon
-      const hp = Math.max(0, w.hp) / MAX_HP;
-      g.fillStyle = HP_INK; g.globalAlpha = 0.85;
-      const fw = 400 * hp; g.fillRect(side === 0 ? bx : bx + 400 - fw, 80, fw, 16);
-      if (w.shield > 0) { g.fillStyle = elc(w.shieldEls); g.globalAlpha = 0.45; const sw = Math.min(400, 400 * w.shield / MAX_HP); g.fillRect(side === 0 ? bx : bx + 400 - sw, 80, sw, 6); }
-      g.globalAlpha = 1; g.strokeStyle = INK; g.lineWidth = 1.6; roughRect(g, bx, 80, 400, 16, 0.8);
-      // mana
-      const mn = w.mana / MAX_MANA, mw = 400 * mn;
-      g.fillStyle = MANA_INK; g.globalAlpha = w.chillT > 0 ? 0.45 : 0.8; g.fillRect(side === 0 ? bx : bx + 400 - mw, 102, mw, 8);
-      g.globalAlpha = 1; g.lineWidth = 1; roughRect(g, bx, 102, 400, 8, 0.6);
+      const hp = Math.max(0, w.hp) / MAX_HP, fw = 380 * hp;
+      g.fillStyle = HP_INK; g.globalAlpha = 0.85; g.fillRect(side === 0 ? bx : bx + 380 - fw, 64, fw, 16);
+      if (w.shield > 0) { g.fillStyle = elc(w.shieldEls); g.globalAlpha = 0.5; const sw = Math.min(380, 380 * w.shield / MAX_HP); g.fillRect(side === 0 ? bx : bx + 380 - sw, 64, sw, 6); }
+      g.globalAlpha = 1; g.strokeStyle = INK; g.lineWidth = 1.6; roughRect(g, bx, 64, 380, 16, 0.8);
+      const mw = 380 * w.mana / MAX_MANA;
+      g.fillStyle = MANA_INK; g.globalAlpha = w.chillT > 0 ? 0.5 : 0.8; g.fillRect(side === 0 ? bx : bx + 380 - mw, 86, mw, 8);
+      g.globalAlpha = 1; g.lineWidth = 1; roughRect(g, bx, 86, 380, 8, 0.6);
       g.font = `14px ${FELL}`; g.fillStyle = INK; g.textAlign = al;
-      g.fillText(`${Math.ceil(w.hp)} life · ${Math.floor(w.mana)} ink`, side === 0 ? bx : bx + 400, 128);
+      g.fillText(`${Math.ceil(w.hp)} life · ${Math.floor(w.mana)} ink`, side === 0 ? bx : bx + 380, 112);
+      // statuses
+      let sx = side === 0 ? bx : bx + 380;
+      g.font = `italic 14px ${FELL}`;
+      for (const [n, c] of statusList(w)) {
+        const tw = g.measureText(n).width;
+        if (side === 1) sx -= tw;
+        g.fillStyle = c; g.textAlign = 'left'; g.fillText(n, sx, 132);
+        sx += side === 0 ? tw + 10 : -10;
+      }
       // rune strip
       const lo = S.loadouts?.[p]; if (!lo) continue;
-      const mine = p === view.me, sz = mine ? 62 : 44, gap = mine ? 72 : 52, y0 = H - 56 - sz;
+      const mine = p === me, sz = mine ? 64 : 44, gap = mine ? 74 : 52, y0 = H - 30 - sz;
+      const x0 = side === 0 ? 60 : W - 60 - sz - (lo.length - 1) * gap;
+      this.slipAt(g, x0 - 14, y0 - (mine ? 34 : 12), (lo.length - 1) * gap + sz + 28, sz + (mine ? 58 : 30));
       lo.forEach((r, i) => {
-        const x = side === 0 ? 56 + i * gap : W - 56 - sz - (lo.length - 1 - i) * gap;
-        const cost = runeCost(r.form, 1), cd = w.cds[i], ready = cd <= 0 && w.mana >= cost;
+        const x = x0 + i * gap;
+        const cost = runeCost(r.form, 1), cd = w.cds[i], ready = cd <= 0 && w.mana >= cost && !(w.silenceT > 0);
         g.globalAlpha = ready ? 1 : 0.45; g.drawImage(this.thumb(r), x, y0, sz, sz);
         g.strokeStyle = INK; g.lineWidth = 1.2; roughRect(g, x, y0, sz, sz, 0.7);
         if (cd > 0) { g.globalAlpha = 0.7; g.fillStyle = PAPER; g.fillRect(x + 1, y0 + 1, sz - 2, (sz - 2) * Math.min(1, cd / FORMS[r.form].cd)); }
         g.globalAlpha = 1;
         if (mine) {
           g.font = `12px ${FELL}`; g.fillStyle = INK; g.textAlign = 'center';
-          g.fillText(FORMS[r.form].name, x + sz / 2, y0 + sz + 14);
+          g.fillText(`${i + 1} · ${FORMS[r.form].name}`, x + sz / 2, y0 + sz + 15);
           g.textAlign = 'right'; g.fillStyle = MANA_INK; g.fillText(cost, x + sz - 3, y0 + 13);
         }
       });
-      if (p === view.me && S.t - w.chainT < 1.6 && w.chain >= 1) {
-        g.font = `italic 20px ${FELL}`; g.fillStyle = HP_INK; g.textAlign = al;
-        g.fillText(`flourish ×${(1 + 0.08 * Math.min(5, w.chain + 1)).toFixed(2)} if you cast now`, side === 0 ? 56 : W - 56, y0 - 14);
+      if (mine && S.t - w.chainT < 1.6 && w.chain >= 0 && w.castT === 0 && S.phase === 'fight') {
+        g.font = `italic 17px ${FELL}`; g.fillStyle = HP_INK; g.textAlign = 'left';
+        g.fillText(`flourish ×${(1 + 0.08 * Math.min(5, w.chain + 1)).toFixed(2)} if you cast now`, x0, y0 - 12);
       }
     }
     // timer
+    this.slipAt(g, W / 2 - 80, 18, 160, 96);
     g.textAlign = 'center'; g.fillStyle = INK; g.globalAlpha = 1;
-    g.font = `18px ${FELL_SC}`; g.fillText(`Round ${['I', 'II', 'III', 'IV', 'V'][S.round - 1] || S.round}`, W / 2, 56);
-    const tt = Math.max(0, Math.ceil(S.roundT)); g.font = `44px ${FELL_SC}`;
+    g.font = `18px ${FELL_SC}`; g.fillText(S.tut ? 'Practice' : `Round ${['I', 'II', 'III', 'IV', 'V'][S.round - 1] || S.round}`, W / 2, 46);
+    const tt = Math.max(0, Math.ceil(S.roundT)); g.font = `42px ${FELL_SC}`;
     g.fillStyle = tt <= 10 && S.phase === 'fight' ? HP_INK : INK;
-    g.fillText(`${Math.floor(tt / 60)}:${String(tt % 60).padStart(2, '0')}`, W / 2, 100);
+    g.fillText(S.tut ? '∞' : `${Math.floor(tt / 60)}:${String(tt % 60).padStart(2, '0')}`, W / 2, 92);
     if (S.phase === 'count') {
-      g.font = `120px ${FELL_SC}`; g.fillStyle = INK; g.globalAlpha = 0.85;
-      g.fillText(String(Math.ceil(S.phaseT)), W / 2, H / 2 + 40);
-      g.globalAlpha = 1;
+      g.font = `130px ${FELL_SC}`; g.lineWidth = 8; g.strokeStyle = 'rgba(241,228,196,0.85)';
+      g.strokeText(String(Math.ceil(S.phaseT)), W / 2, H / 2 + 40); g.fillStyle = INK; g.fillText(String(Math.ceil(S.phaseT)), W / 2, H / 2 + 40);
     }
   }
 }

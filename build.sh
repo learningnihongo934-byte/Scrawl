@@ -8,7 +8,7 @@ cd "$(dirname "$0")"
 
 check() {
   for f in public/js/*.js src/*.js tools/*.mjs; do node --check "$f"; done
-  node tools/test.mjs
+  node tools/test.mjs && node tools/allspells.mjs
 }
 
 case "${1:-check}" in

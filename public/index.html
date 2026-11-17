@@ -13,14 +13,21 @@
 </head>
 <body>
 <main id="stage">
-  <canvas id="page"></canvas>
-  <div id="bar" hidden><button id="leave" class="link">Leave duel</button></div>
+  <canvas id="gl"></canvas>
+  <canvas id="hud"></canvas>
+  <div id="bar" hidden><button id="leave" class="link">Leave</button></div>
+  <aside id="tut" hidden>
+    <p id="tutstep" class="step"></p>
+    <p id="tuttext"></p>
+    <div class="row"><button id="tutnext" class="link">Skip this lesson</button><button id="tutend" class="big" hidden>Duel an automaton</button></div>
+  </aside>
 
   <section id="menu" class="screen card" hidden>
     <h1>Scrawl</h1>
     <p class="tag">Draw your own spells. Duel on one page.</p>
     <label class="name">Sign the page <input id="name" maxlength="16" autocomplete="off" spellcheck="false"></label>
     <nav>
+      <button id="tutbtn" class="big">Learn to scrawl</button>
       <button data-go="pick" class="big">Duel an automaton</button>
       <button id="host" class="big">Open a room</button>
       <button data-go="join" class="big">Join a room</button>
@@ -81,12 +88,12 @@
     <div class="helpgrid">
       <div>
         <h4>Draw to cast</h4>
-        <p>Your six runes sit along the bottom of the page. Draw one anywhere and pause for a moment. If the page recognizes it, it becomes the spell. If not, it fizzles.</p>
+        <p>Your six runes sit along the bottom. Draw one anywhere on the book and pause for a moment. If the page recognizes it, it becomes the spell. If not, it fizzles. Or press 1 to 6 (or tap a rune) to quick cast at 70% strength.</p>
         <h4>Where and how you draw</h4>
-        <p><b>Bolts</b> fly straight across from where you drew them. <b>Walls</b> stand where you drew them, on your half, as tall as your drawing. <b>Sigils</b> can go anywhere, even right on your rival, and ignite a moment later. <b>Orbs</b> hunt the enemy wizard. <b>Shields</b> wrap you.</p>
+        <p>Shots (Bolt, Scatter, Beam, Orb, Familiar) fly at your rival from where you drew them. Guards (Wall, Mirror, Mine, Mire, Vortex) go where you draw them on your half. Lobs (Sigil, Comet, Rain) land anywhere, even right on your rival. Curses (Hex, Mark, Silence, Leech) hit your rival wherever you draw them. Self spells (Shield, Thorns, Mend, Haste, Cleanse, Echo) work on you.</p>
         <p>Bigger drawings make stronger spells but cost more ink. Neater drawings are stronger too.</p>
-        <h4>Moving</h4>
-        <p>W and S or the arrow keys, or drag your own wizard up and down.</p>
+        <h4>Standing your ground</h4>
+        <p>Wizards never move. Block with walls, shoot spells down with your own, or shield up.</p>
       </div>
       <div>
         <h4>Fusions</h4>
@@ -94,7 +101,7 @@
         <h4>Flourish</h4>
         <p>Cast again within 1.6 seconds and the next spell grows stronger, up to ×1.4.</p>
         <h4>Elements</h4>
-        <p>Fire beats Life, Life beats Earth, Earth beats Storm, Storm beats Frost, and Frost beats Fire. Void beats nothing but slips straight through walls.</p>
+        <p>Eleven elements, each strong against two others and each with a status: Fire burns, Frost chills, Storm shocks, Venom poisons, Gale winds, Radiant dazzles, Umbral hexes, Iron shatters shields, Life drains, Earth is heavy and Void slips through walls. Your runebook shows who beats whom.</p>
         <h4>Winning</h4>
         <p>Best of three rounds, 90 seconds each. Ink (mana) refills over time, and each rune needs a moment to dry before you can cast it again.</p>
       </div>

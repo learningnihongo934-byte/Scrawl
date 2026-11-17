@@ -64,7 +64,8 @@ export function mountBook(root, getBook, setBook) {
       b.onclick = () => { const bk = book(); bk.runes[sel].el = id; commit(bk); renderAll(); };
       els.append(b);
     });
-    $('#eldesc').textContent = EL[r.el].blurb + (EL[r.el].beats ? ` Strong against ${EL[EL[r.el].beats].name}.` : '');
+    const weak = Object.keys(EL).filter(k => EL[k].beats.includes(r.el)).map(k => EL[k].name);
+    $('#eldesc').textContent = `${EL[r.el].blurb} Strong against ${EL[r.el].beats.map(k => EL[k].name).join(' and ')}.` + (weak.length ? ` Weak to ${weak.join(' and ')}.` : '');
     const fm = $('#forms'); fm.innerHTML = '';
     FORM_IDS.forEach(id => {
       const b = document.createElement('button');
