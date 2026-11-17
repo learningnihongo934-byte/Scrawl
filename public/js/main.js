@@ -17,7 +17,7 @@ let book = loadBook(), tmpls = templatesFor(book.runes), activeTmpls = tmpls;
 let name = 'Scribe';
 try { name = (localStorage.getItem('scrawl.name') || 'Scribe').slice(0, 16); } catch {}
 
-let mode = 'menu';            // menu | ai | tut | host | guest
+let mode = 'menu';            // menu | ai | tut | practice | host | guest
 let S = null, me = 0, bot = null, aiLevel = 0, acc = 0;
 let net = null, netEv = [], snapClock = 0, again = { me: false, them: false }, guestLo = null, guestNames = null;
 const remote = new Map();     // live ink from the other player, by group id
@@ -27,11 +27,12 @@ function show(id) {
   document.querySelectorAll('.screen').forEach(s => { s.hidden = s.id !== id; });
   $('#bar').hidden = !(mode !== 'menu' && !id);
   $('#tut').hidden = !(mode === 'tut' && !id);
+  $('#practice').hidden = !(mode === 'practice' && !id);
   $('#fusepanel').hidden = !(mode !== 'menu' && !id);
 }
 function toMenu(note) {
   if (net) { net.close(); net = null; }
-  mode = 'menu'; S = null; bot = null; tut = null; L.guide = null; R.setView(0); L.reset(); R.clearInk(); remote.clear(); activeTmpls = tmpls;
+  mode = 'menu'; S = null; bot = null; tut = null; $('#pfoe').value = '-1'; practice.foe = -1; L.guide = null; R.setView(0); L.reset(); R.clearInk(); remote.clear(); activeTmpls = tmpls;
   show('menu');
   $('#menunote').textContent = note || '';
 }
@@ -56,7 +57,7 @@ paintVol();
 
 const bookUI = mountBook($('#book'), () => book, b => { book = b; tmpls = templatesFor(book.runes); if (mode !== 'tut') activeTmpls = tmpls; });
 
-$('#leave').onclick = () => { if (mode === 'tut' || confirm('Leave this duel?')) toMenu(); };
+$('#leave').onclick = () => { if (mode === 'tut' || mode === 'practice' || confirm('Leave this duel?')) toMenu(); };
 
 function begin(loadouts, names, opts, view) {
   S = newMatch(loadouts, names, opts); me = view; R.setView(view); L.reset(); R.clearEnts(); remote.clear(); acc = 0;
@@ -91,8 +92,26 @@ function startAI(lvl) {
   show(null);
 }
 
+// ---------- practice: your own runes, a dummy that never falls, no timer ----------
+const practice = { dmg: 0, last: 0, foe: -1 };
+function startPractice(foe = practice.foe) {
+  practice.foe = foe; practice.dmg = 0; practice.last = 0;
+  mode = 'practice'; activeTmpls = tmpls; bot = foe >= 0 ? new Bot(foe, 1) : null;
+  const still = Array.from({ length: 6 }, () => ({ el: 'earth', form: 'bolt', glyph: STARTER_GLYPH }));
+  begin([loadoutOf(book), foe >= 0 ? botLoadout(foe) : still], [name, foe >= 0 ? `${LEVELS[foe].name} (practice)` : 'Practice Dummy'], { tut: true }, 0);
+  report('Draw any of your runes. The page tells you what it read.');
+  paintPracticeDmg();
+  show(null);
+}
+function report(text) { if (mode === 'practice') $('#practicemsg').innerHTML = text; }
+function paintPracticeDmg() { $('#practicedmg').textContent = practice.dmg ? `Damage dealt: ${Math.round(practice.dmg)} (last hit ${practice.last})` : ''; }
+$('#practicebtn').onclick = () => { audioInit(); sfx('page'); startPractice(); };
+$('#pfoe').onchange = e => startPractice(parseInt(e.target.value, 10));
+$('#preset').onclick = () => startPractice();
+
 // ---------- tutorial ----------
 const STARTER = defaultBook();
+const STARTER_GLYPH = STARTER.runes[0].samples[0];
 const TUT = [
   { slot: 0, at: [470, 330], text: 'Draw the <b>Fire Bolt</b> rune, a triangle, on your half of the page. Trace the faint guide if you like. Lift the pen and pause, and it casts.', done: e => e.type === 'cast' && e.p === 0 && e.form === 'bolt' },
   { slot: 2, at: [330, 450], dummy: true, text: 'The dummy is firing back. Draw the <b>Earth Wall</b> rune, a square, between you and it to block the next shot.', done: e => e.type === 'wallhit' },
@@ -336,13 +355,16 @@ function finishRune() {
   if (!res && !useSplit) {
     R.glyphDone(strokes, 'fizzle'); sfx('fizzle');
     L.pop(sh.cx, sh.cy, near >= 0 ? `fizzled (closest: ${runeName(S.loadouts[me][near])})` : 'fizzled', '#6b5a48', 22);
+    report(near >= 0 ? `Fizzled. Closest was <b>${runeName(S.loadouts[me][near])}</b> (rune ${near + 1}) but it was too far off. Try drawing it bigger or closer to how you taught it.` : 'Fizzled: that did not look like any of your runes.');
     end('fizzle'); return;
   }
   const lo = S.loadouts[me];
   if (useSplit) {
     const { r1, r2 } = best;
+    report(`Read two connected runes: <b>${runeName(lo[r1.slot])}</b> + <b>${runeName(lo[r2.slot])}</b> → <b>${fusionName([...new Set([lo[r1.slot].el, lo[r2.slot].el])])}</b> fusion.`);
     sendCast({ slot: r2.slot, with: r1.slot, cx: sh.cx, cy: sh.cy, w: sh.w, h: sh.h, ang: sh.ang, q: Math.min(r1.q, r2.q) }, lo[r2.slot], strokes, true, [lo[r1.slot].el, lo[r2.slot].el]);
   } else {
+    report(`Read <b>${runeName(lo[res.slot])}</b> (rune ${res.slot + 1}) · neatness ${Math.round(res.q * 100)}% · size power ×${sizePower(sh.w, sh.h).toFixed(2)}`);
     sendCast({ slot: res.slot, cx: sh.cx, cy: sh.cy, w: sh.w, h: sh.h, ang: sh.ang, q: res.q, host: R.pickHost(look, me) }, lo[res.slot], strokes);
   }
 }
@@ -361,14 +383,14 @@ function handleEvents(evs) {
     if (mode === 'tut') tutEvent(e);
     switch (e.type) {
       case 'cast': sfx(e.form === 'scatter' || e.form === 'beam' ? 'bolt' : e.form === 'comet' || e.form === 'rain' ? 'sigil' : e.form === 'mirror' || e.form === 'totem' || e.form === 'mine' ? 'wall' : ['mend', 'haste', 'cleanse', 'thorns', 'echo'].includes(e.form) ? 'shield' : ['hex', 'mark', 'silence', 'leech', 'mire', 'vortex', 'familiar'].includes(e.form) ? 'orb' : e.form); if (e.fused) sfx('fuse'); break;
-      case 'hit': if (e.amt > 0) sfx('hit'); break;
+      case 'hit': if (e.amt > 0) sfx('hit'); if (mode === 'practice' && e.p === 1 && e.amt > 0) { practice.dmg += e.amt; practice.last = e.amt; paintPracticeDmg(); } break;
       case 'wallhit': sfx('wallhit'); break;
       case 'wallbreak': case 'shieldbreak': sfx('break'); break;
       case 'clash': case 'pierce': case 'reflect': sfx('clash'); break;
       case 'blast': sfx('blast'); break;
       case 'beam': sfx('clash'); break;
-      case 'round': L.reset(); if (mode !== 'tut') L.setBanner(`Round ${e.round}`, e.round === 1 && mode === 'ai' ? 'Draw a rune from your strip, anywhere on the page' : '', 1.6); break;
-      case 'go': if (mode !== 'tut') { L.setBanner('Scrawl!', '', 0.9, '#8e2b1e'); sfx('bell'); } break;
+      case 'round': L.reset(); if (mode !== 'tut' && mode !== 'practice') L.setBanner(`Round ${e.round}`, e.round === 1 && mode === 'ai' ? 'Draw a rune from your strip, anywhere on the page' : '', 1.6); break;
+      case 'go': if (mode !== 'tut' && mode !== 'practice') { L.setBanner('Scrawl!', '', 0.9, '#8e2b1e'); sfx('bell'); } break;
       case 'roundEnd': {
         const t = e.winner < 0 ? 'Even' : e.winner === me ? 'Round won' : 'Round lost';
         L.setBanner(t, e.timeout ? 'Out of time' : '', 2.4, e.winner === me ? '#3c6d37' : e.winner < 0 ? INK : '#8e2b1e');
@@ -428,7 +450,13 @@ function loop(now) {
   // behind the menus the desk only needs half the frames
   if (!S && mode === 'menu' && (idleFrame++ & 1)) { requestAnimationFrame(loop); return; }
   const dt = Math.min(0.05, (now - prev) / 1000); prev = now;
-  if (S && (mode === 'ai' || mode === 'host' || mode === 'tut')) {
+  if (S && mode === 'practice') {
+    const w = S.wiz[me];
+    if ($('#pink').checked) w.mana = 100;
+    if ($('#pdry').checked) w.cds.fill(0);
+    for (const x of S.wiz) if (x.hp < 2) x.hp = 200;   // nobody falls in practice
+  }
+  if (S && (mode === 'ai' || mode === 'host' || mode === 'tut' || mode === 'practice')) {
     acc += dt;
     while (acc >= 1 / 60) {
       if (bot) runBot(1 / 60);

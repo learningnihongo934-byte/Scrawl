@@ -175,3 +175,14 @@ footer { margin-top: 12px; font-size: 14px; color: var(--ink-soft); }
 @media (max-width: 760px) { #fusepanel { width: 42%; top: 18%; } }
 
 #fusepanel[hidden], #tut[hidden], #bar[hidden] { display: none; }
+
+.trio { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+#practice { position: absolute; left: 50%; top: 14.5%; transform: translateX(-50%); width: min(600px, 46%); padding: 8px 16px 6px;
+  background: var(--paper-hi); border: 1.5px solid var(--ink); box-shadow: 4px 5px 0 rgba(20,12,6,0.4); text-align: center; font-size: 16px; }
+#practice[hidden] { display: none; }
+#practice .step { margin: 0; font-family: var(--fell-sc); color: var(--oxblood); font-size: 15px; }
+#practice p { margin: 3px 0; }
+#practicedmg { min-height: 0; margin: 0; }
+.prow { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; align-items: center; font-size: 14px; color: var(--ink-soft); }
+.prow input[type=checkbox] { accent-color: #8e2b1e; vertical-align: -2px; }
+.prow select { font: inherit; color: var(--ink); background: transparent; border: 0; border-bottom: 1.5px solid var(--ink); }

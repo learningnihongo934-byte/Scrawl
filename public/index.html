@@ -23,6 +23,17 @@
       <ul id="fuselist"></ul>
     </div>
   </aside>
+  <aside id="practice" hidden>
+    <p class="step">Practice</p>
+    <p id="practicemsg">Draw any of your runes. The page tells you what it read.</p>
+    <p id="practicedmg" class="desc"></p>
+    <div class="prow">
+      <label><input type="checkbox" id="pink" checked> Infinite ink</label>
+      <label><input type="checkbox" id="pdry"> No drying</label>
+      <label>Dummy <select id="pfoe"><option value="-1">Stands still</option><option value="0">Fights as Wick</option><option value="1">Fights as Marrow</option><option value="2">Fights as the Archivist</option></select></label>
+      <button id="preset" class="link">Reset</button>
+    </div>
+  </aside>
   <aside id="tut" hidden>
     <p id="tutstep" class="step"></p>
     <p id="tuttext"></p>
@@ -38,7 +49,7 @@
       <button data-go="pick" class="big">Duel an automaton</button>
       <button id="host" class="big">Open a room</button>
       <button data-go="join" class="big">Join a room</button>
-      <div class="pair"><button data-go="book">Runebook</button><button data-go="help">How to play</button></div>
+      <div class="trio"><button id="practicebtn">Practice</button><button data-go="book">Runebook</button><button data-go="help">How to play</button></div>
     </nav>
     <p id="menunote" class="note"></p>
     <footer><button id="vol" class="link"></button> · Made by Virat Reddy Kaukuntla</footer>
