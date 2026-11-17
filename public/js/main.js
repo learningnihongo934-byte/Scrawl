@@ -1,8 +1,8 @@
 // Scrawl: screens, pen input, game loop, AI duels, tutorial and online rooms (host runs the sim, guest sends casts).
-import { W, H, EL, FORMS, runeName } from './data.js';
+import { W, H, EL, FORMS, runeName, fusionName } from './data.js';
 import { newMatch, step, cast, snapshot, runeCost, sizePower } from './sim.js';
 import { recognize, templatesFor, shapeOf, REJECT } from './recognizer.js';
-import { INK } from './render.js';
+import { INK, drawGlyph, elc } from './render.js';
 import { Book3D } from './render3d.js';
 import { audioInit, sfx, scratchStart, scratchStop, scratchSpeed, getVol, setVol } from './audio.js';
 import { Bot, LEVELS, botLoadout } from './ai.js';
@@ -27,6 +27,7 @@ function show(id) {
   document.querySelectorAll('.screen').forEach(s => { s.hidden = s.id !== id; });
   $('#bar').hidden = !(mode !== 'menu' && !id);
   $('#tut').hidden = !(mode === 'tut' && !id);
+  $('#fusepanel').hidden = !(mode !== 'menu' && !id);
 }
 function toMenu(note) {
   if (net) { net.close(); net = null; }
@@ -59,7 +60,29 @@ $('#leave').onclick = () => { if (mode === 'tut' || confirm('Leave this duel?'))
 
 function begin(loadouts, names, opts, view) {
   S = newMatch(loadouts, names, opts); me = view; R.setView(view); L.reset(); R.clearEnts(); remote.clear(); acc = 0;
+  buildFusePanel(loadouts[view]);
 }
+
+// ---------- side panel: every fusion your six runes can make ----------
+let fuseOpen = true;
+try { fuseOpen = localStorage.getItem('scrawl.fusepanel') !== 'closed'; } catch {}
+const glyphIcon = r => { const c = document.createElement('canvas'); c.width = c.height = 52; drawGlyph(c.getContext('2d'), r.glyph, 2, 2, 48, elc([r.el]), 4); c.title = runeName(r); return c; };
+function buildFusePanel(lo) {
+  const ul = $('#fuselist'); ul.innerHTML = '';
+  const fname = (a, b) => (a.form === 'wall' && b.form === 'bolt') || (a.form === 'bolt' && b.form === 'wall') ? 'Ram' : FORMS[b.form].name;
+  for (let i = 0; i < lo.length; i++) for (let j = i + 1; j < lo.length; j++) {
+    const a = lo[i], b = lo[j], els = [...new Set([a.el, b.el])], name = fusionName(els);
+    const f1 = fname(a, b), f2 = fname(b, a);
+    const li = document.createElement('li');
+    li.append(glyphIcon(a), Object.assign(document.createElement('i'), { textContent: '+' }), glyphIcon(b));
+    const t = document.createElement('div');
+    t.innerHTML = `<b style="color:${elc(els)}">${name}</b><small>${f1 === f2 ? f1 : `${f1} or ${f2}`}</small>`;
+    li.append(t); ul.append(li);
+  }
+  paintFuse();
+}
+function paintFuse() { $('#fusepanel').classList.toggle('closed', !fuseOpen); }
+$('#fusehead').onclick = () => { fuseOpen = !fuseOpen; try { localStorage.setItem('scrawl.fusepanel', fuseOpen ? 'open' : 'closed'); } catch {} paintFuse(); };
 
 // ---------- AI duel ----------
 function startAI(lvl) {
@@ -76,7 +99,7 @@ const TUT = [
   { slot: 3, at: [300, 280], text: 'Draw the <b>Life Shield</b> rune, a circle, anywhere. It wraps your wizard and soaks damage.', done: e => e.type === 'cast' && e.p === 0 && e.form === 'shield' },
   { slot: 5, at: [1508, 450], text: 'Sigils can go anywhere, even on your rival. Draw the <b>Frost Sigil</b>, a cross, right on top of the dummy.', done: e => e.type === 'blast' && e.o === 0 },
   { slot: 4, at: [520, 600], text: 'Draw the <b>Void Orb</b> rune, a spiral. Orbs hunt the enemy, and Void slips through walls.', done: e => e.type === 'cast' && e.p === 0 && e.form === 'orb' },
-  { slot: 2, at: [470, 450], text: '<b>Fusion:</b> draw a wall, then draw a bolt rune (triangle or zigzag) right on top of it. The wall launches as a <b>Ram</b>.', done: e => e.type === 'cast' && e.p === 0 && e.ram },
+  { slot: 2, at: [470, 450], text: '<b>Fusion:</b> draw two runes connected, like a square flowing straight into a triangle, all in one go. Wall + Bolt fuse into a <b>Ram</b>. Your fusions are listed on the left (press F).', done: e => e.type === 'cast' && e.p === 0 && e.ram },
   { text: '<b>Quick cast:</b> press a number key 1 to 6, or tap a rune in your strip. It fires at a set spot at 70% strength, with no drawing needed.', done: e => e.type === 'cast' && e.p === 0 && e.quick },
   { end: true, text: 'Bigger drawings hit harder, and neater ones too. Casting again within 1.6 seconds builds a <b>Flourish</b>. There are 11 elements and 24 forms: teach your own runes in the <b>Runebook</b>.' },
 ];
@@ -171,6 +194,7 @@ function onNet(m) {
       if (!Array.isArray(m.lo) || !validLo(m.lo[0]) || !validLo(m.lo[1])) return;
       mode = 'guest'; me = 1; R.setView(1); L.reset(); R.clearEnts(); remote.clear(); again = { me: false, them: false }; activeTmpls = tmpls;
       S = null; guestLo = m.lo; guestNames = m.names;
+      buildFusePanel(m.lo[1]);
       show(null);
       break;
     case 's':
@@ -181,7 +205,7 @@ function onNet(m) {
     case 'cast':
       if (mode !== 'host' || !S || !m.spec) return;
       cast(S, 1, { slot: num(m.spec.slot, 0, 5) | 0, cx: num(m.spec.cx, 0, W), cy: num(m.spec.cy, 0, H), w: num(m.spec.w, 0, W), h: num(m.spec.h, 0, H),
-        ang: typeof m.spec.ang === 'number' ? num(m.spec.ang, -4, 4) : null, q: num(m.spec.q, 0, 1), quick: !!m.spec.quick, host: Number.isInteger(m.spec.host) ? m.spec.host : null });
+        ang: typeof m.spec.ang === 'number' ? num(m.spec.ang, -4, 4) : null, q: num(m.spec.q, 0, 1), quick: !!m.spec.quick, host: Number.isInteger(m.spec.host) ? m.spec.host : null, with: Number.isInteger(m.spec.with) ? num(m.spec.with, 0, 5) : null });
       break;
     case 'ink': {
       if (!Array.isArray(m.s) || m.s.length > 6) return;
@@ -208,17 +232,18 @@ function onNet(m) {
 }
 
 // ---------- casting ----------
-function sendCast(spec, rune, strokes, last = true) {
+function sendCast(spec, rune, strokes, last = true, inkEls = null) {
   const end = (res, el) => { if (strokes && last) net?.send({ t: 'inkEnd', g: pen.g, res, el }); };
   if (mode === 'guest') {
-    const w = S.wiz[me], cost = runeCost(rune.form, spec.quick ? 1 : sizePower(spec.w, spec.h));
-    const why = w.silenceT > 0 || w.shockT > 0 ? 'silenced' : w.cds[spec.slot] > 0 ? 'cd' : w.mana < cost ? 'mana' : null;
+    const w = S.wiz[me], pw = spec.quick ? 1 : sizePower(spec.w, spec.h), partner = Number.isInteger(spec.with) ? S.loadouts[me][spec.with] : null;
+    const cost = runeCost(rune.form, pw) + (partner ? runeCost(partner.form, pw) : 0);
+    const why = w.silenceT > 0 || w.shockT > 0 ? 'silenced' : w.cds[spec.slot] > 0 || (partner && w.cds[spec.with] > 0) ? 'cd' : w.mana < cost ? 'mana' : null;
     if (why) { L.event({ type: 'fail', reason: why, x: spec.cx, y: spec.cy }); if (strokes) R.glyphDone(strokes, 'fizzle'); sfx('fizzle'); end('fizzle'); return; }
     net.send({ t: 'cast', spec });
-    if (strokes) R.glyphDone(strokes, 'cast', [rune.el]); end('cast', rune.el);
+    if (strokes) R.glyphDone(strokes, 'cast', inkEls || [rune.el]); end('cast', rune.el);
   } else {
     const r = cast(S, me, spec);
-    if (r.ok) { if (strokes) R.glyphDone(strokes, 'cast', [rune.el]); end('cast', rune.el); }
+    if (r.ok) { if (strokes) R.glyphDone(strokes, 'cast', inkEls || [rune.el]); end('cast', rune.el); }
     else { if (strokes) R.glyphDone(strokes, 'fizzle'); sfx('fizzle'); end('fizzle'); }
   }
 }
@@ -281,35 +306,50 @@ function finishRune() {
   if (!S || S.phase !== 'fight' || !strokes.length) { end('none'); return; }
   const sh = shapeOf(strokes.map(s => s.map(p => [p[0], p[1]])));
   if (sh.len < 26) { end('none'); return; }
-  // recognize what the player saw on screen; if the whole drawing isn't a rune, try it as two runes drawn back to back
-  let parts = null, split = null;
+  // Recognize what the player saw on screen. A drawing can be one rune, or two runes drawn connected
+  // (separate strokes, or one continuous stroke) which fuse into one spell.
   const whole = recognize(scr, activeTmpls);
-  if (whole && whole.slot >= 0) parts = [{ a: 0, b: strokes.length, res: whole }];
-  for (let k = 1; k < strokes.length; k++) {
-    const r1 = recognize(scr.slice(0, k), activeTmpls), r2 = recognize(scr.slice(k), activeTmpls);
-    if (r1 && r1.slot >= 0 && r2 && r2.slot >= 0 && (!split || r1.d + r2.d < split.d)) split = { d: r1.d + r2.d, parts: [{ a: 0, b: k, res: r1 }, { a: k, b: strokes.length, res: r2 }] };
-  }
-  // two clean runes beat one muddy one (a quick wall-then-bolt Ram); real two-stroke runes don't split cleanly
-  if (split && (!parts || split.d / 2 < whole.d - 0.08)) parts = split.parts;
+  const plen = st => st.reduce((t, s) => t + s.reduce((u, p, i) => i ? u + Math.hypot(p[0] - s[i - 1][0], p[1] - s[i - 1][1]) : 0, 0), 0);
+  const total = plen(scr);
+  let best = null;
+  const tryCut = (a, b) => {
+    if (plen(a) < total * 0.2 || plen(b) < total * 0.2) return;
+    const r1 = recognize(a, activeTmpls), r2 = recognize(b, activeTmpls);
+    if (r1 && r1.slot >= 0 && r2 && r2.slot >= 0) { const d = (r1.d + r2.d) / 2; if (!best || d < best.d) best = { d, r1, r2 }; }
+  };
+  for (let k = 1; k < scr.length; k++) tryCut(scr.slice(0, k), scr.slice(k));
+  scr.forEach((s, si) => {
+    if (s.length < 14) return;
+    // cut the stroke in two, also dropping a short joining line between the two runes
+    for (let f = 0.2; f <= 0.8; f += 0.05) for (const gap of [0, 0.05, 0.1, 0.15]) {
+      const c1 = Math.floor(s.length * f), c2 = Math.min(s.length - 2, c1 + Math.floor(s.length * gap));
+      tryCut([...scr.slice(0, si), s.slice(0, c1 + 1)], [s.slice(c2), ...scr.slice(si + 1)]);
+    }
+  });
+  const wholeOk = whole && whole.slot >= 0;
+  const useSplit = best && (!wholeOk || best.d < whole.d - 0.25);
   // drawn on top of one of my own spells and nearly a rune: the intent is clear, so cast the closest match
   const near = whole && whole.slot < 0 && whole.near !== undefined ? whole.near : -1;
-  if (!parts && near >= 0 && whole.d < REJECT + 0.5 && R.pickHost(scr.flatMap(s => s.filter((_, j) => j % 4 === 0)), me) !== null)
-    parts = [{ a: 0, b: strokes.length, res: { slot: near, d: whole.d, q: 0.15 } }];
-  if (!parts) {
+  const look = scr.flatMap(s => s.filter((_, j) => j % 4 === 0));
+  let res = useSplit ? null : wholeOk ? whole : null;
+  if (!res && !useSplit && near >= 0 && whole.d < REJECT + 0.5 && R.pickHost(look, me) !== null) res = { slot: near, d: whole.d, q: 0.15 };
+  if (!res && !useSplit) {
     R.glyphDone(strokes, 'fizzle'); sfx('fizzle');
     L.pop(sh.cx, sh.cy, near >= 0 ? `fizzled (closest: ${runeName(S.loadouts[me][near])})` : 'fizzled', '#6b5a48', 22);
     end('fizzle'); return;
   }
-  parts.forEach((pt, i) => {
-    const st = strokes.slice(pt.a, pt.b), sc = scr.slice(pt.a, pt.b), shp = shapeOf(st.map(s => s.map(p => [p[0], p[1]])));
-    const look = sc.flatMap(s => s.filter((_, j) => j % 4 === 0));   // screen points to look under for my own spells
-    const host = R.pickHost(look, me);
-    sendCast({ slot: pt.res.slot, cx: shp.cx, cy: shp.cy, w: shp.w, h: shp.h, ang: shp.ang, q: pt.res.q, host }, S.loadouts[me][pt.res.slot], st, i === parts.length - 1);
-  });
+  const lo = S.loadouts[me];
+  if (useSplit) {
+    const { r1, r2 } = best;
+    sendCast({ slot: r2.slot, with: r1.slot, cx: sh.cx, cy: sh.cy, w: sh.w, h: sh.h, ang: sh.ang, q: Math.min(r1.q, r2.q) }, lo[r2.slot], strokes, true, [lo[r1.slot].el, lo[r2.slot].el]);
+  } else {
+    sendCast({ slot: res.slot, cx: sh.cx, cy: sh.cy, w: sh.w, h: sh.h, ang: sh.ang, q: res.q, host: R.pickHost(look, me) }, lo[res.slot], strokes);
+  }
 }
 
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
+  if (e.key.toLowerCase() === 'f' && S && mode !== 'menu') { $('#fusehead').click(); return; }
   const n = parseInt(e.key, 10);
   if (n >= 1 && n <= 6 && S && mode !== 'menu') { quickCast(n - 1); e.preventDefault(); }
 });
@@ -364,7 +404,7 @@ $('#again').onclick = () => {
 const arcadeScore = (score, meta) => { try { if (window.parent !== window) window.parent.postMessage({ rennkoArcade: 1, type: 'score', score, meta }, 'https://arcade.rennko.tech'); } catch {} };
 
 // ---------- loop ----------
-let prev = performance.now(), lastCount = 0;
+let prev = performance.now(), lastCount = 0, idleFrame = 0;
 function runBot(dt) {
   const job = bot.update(S, dt);
   if (job) R.liveInk('bot', []);
@@ -385,6 +425,8 @@ function runDummy(dt) {
   if (tut.fireT <= 0) { tut.fireT = 2.6; cast(S, 1, { slot: 0, cx: 1250, cy: 450, w: 90, h: 90, ang: null, q: 0.4 }); S.wiz[1].mana = 100; S.wiz[1].cds.fill(0); }
 }
 function loop(now) {
+  // behind the menus the desk only needs half the frames
+  if (!S && mode === 'menu' && (idleFrame++ & 1)) { requestAnimationFrame(loop); return; }
   const dt = Math.min(0.05, (now - prev) / 1000); prev = now;
   if (S && (mode === 'ai' || mode === 'host' || mode === 'tut')) {
     acc += dt;

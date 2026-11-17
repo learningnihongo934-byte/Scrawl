@@ -43,7 +43,7 @@ function mkWiz(p) {
   return { x: WIZ_X[p], y: H / 2, hp: MAX_HP, mana: 60, shield: 0, shieldMax: 0, shieldT: 0, shieldEls: [], thorns: false,
     burnT: 0, chillT: 0, shockT: 0, windT: 0, dazzleT: 0, hexT: 0, markT: 0, silenceT: 0, poisonN: 0, poisonT: 0,
     hasteT: 0, regenT: 0, regen: 0, leechT: 0, leech: 0,
-    cds: [0, 0, 0, 0, 0, 0], hurtT: 0, castT: 0, chain: 0, chainT: -9, last: null };
+    cds: [0, 0, 0, 0, 0, 0], hurtT: 0, castT: 0, chain: 0, chainT: -9, last: null, lastCast: null };
 }
 const mkStats = () => ({ dmg: 0, casts: 0, fused: 0, best: '' });
 
@@ -95,13 +95,17 @@ export function cast(S, p, spec) {
   const rune = S.loadouts[p]?.[spec.slot];
   if (!rune) return { ok: false, reason: 'unknown' };
   const w = S.wiz[p], Fm = FORMS[rune.form];
-  const quick = !!spec.quick, pw = quick ? 1 : sizePower(spec.w || 0, spec.h || 0), cost = runeCost(rune.form, pw);
+  const quick = !!spec.quick, pw = quick ? 1 : sizePower(spec.w || 0, spec.h || 0);
+  // two runes drawn connected, as one drawing: spec.with is the first rune, spec.slot the second
+  const partner = !quick && Number.isInteger(spec.with) && spec.with !== spec.slot && rune.form !== 'echo' ? S.loadouts[p]?.[spec.with] || null : null;
+  const cost = runeCost(rune.form, pw) + (partner ? runeCost(partner.form, pw) : 0);
   const fail = reason => { S.ev.push({ type: 'fail', p, reason, x: spec.cx, y: spec.cy }); return { ok: false, reason }; };
   if (w.silenceT > 0 || w.shockT > 0) return fail('silenced');
-  if (w.cds[spec.slot] > 0) return fail('cd');
+  if (w.cds[spec.slot] > 0 || (partner && w.cds[spec.with] > 0)) return fail('cd');
   if (w.mana < cost) return fail('mana');
   if (rune.form === 'echo' && !w.last) return fail('echo');
   w.mana -= cost; w.cds[spec.slot] = Fm.cd; w.castT = 0.4;
+  if (partner) w.cds[spec.with] = FORMS[partner.form].cd;
   w.chain = S.t - w.chainT < 1.6 ? Math.min(w.chain + 1, 5) : 0; w.chainT = S.t;
   const q = quick ? 0.3 : clamp(spec.q ?? 0.6, 0, 1);
   let power = pw * (0.85 + 0.3 * q) * (1 + 0.08 * w.chain) * (quick ? 0.7 : 1) * (w.dazzleT > 0 ? 0.8 : 1);
@@ -114,27 +118,41 @@ export function cast(S, p, spec) {
     return { ok: true };
   }
 
-  // Fusion: draw a rune on top of one of your own spells
-  let els = [rune.el], host = null;
+  // Fusion: draw a rune on top of one of your own spells, draw two runes connected, or draw one right after another
+  let els = [rune.el], host = null, form = rune.form;
+  if (partner) {
+    const virt = (el, k) => ({ virtual: true, k, els: [el], x: spec.cx, y: spec.cy, len: clamp(Math.max(spec.w || 0, spec.h || 0) * 1.15, 90, 340), hp: 30 * pw * elStats([el]).hp, ang: null });
+    if (partner.form === 'wall' && rune.form === 'bolt') host = virt(partner.el, 'wall');
+    else if (partner.form === 'bolt' && rune.form === 'wall') { host = virt(rune.el, 'wall'); form = 'bolt'; els = [partner.el]; }
+    else host = { virtual: true, els: [partner.el], x: spec.cx, y: spec.cy };
+  }
   const FUSABLE = ['wall', 'sigil', 'comet', 'zone', 'rain', 'orb', 'totem', 'mine', 'fam'];
-  if (!quick && Number.isInteger(spec.host)) host = S.ents.find(e => e.id === spec.host && e.o === p && !e.dead && FUSABLE.includes(e.k)) || null;
+  if (!host && !quick && Number.isInteger(spec.host)) host = S.ents.find(e => e.id === spec.host && e.o === p && !e.dead && FUSABLE.includes(e.k)) || null;
   for (const e of quick || host ? [] : S.ents) {
     if (e.o !== p || e.dead) continue;
     const d = e.k === 'wall' ? segDist(spec.cx, spec.cy, e) : hyp(spec.cx - e.x, spec.cy - e.y);
     const reach = e.k === 'wall' ? 60 : (e.k === 'sigil' || e.k === 'comet' || e.k === 'zone' || e.k === 'rain') ? e.r * 0.8 : (e.k === 'orb' || e.k === 'totem' || e.k === 'mine' || e.k === 'fam') ? (e.r || 20) + 34 : -1;
     if (d < reach) { host = e; break; }
   }
+  // drawn together: a second rune within 1.6 s of the first, near where the first was drawn, fuses into that spell wherever it is now
+  const lc = w.lastCast;
+  if (!host && !quick && lc && !lc.used && S.t - lc.t < 1.6 && hyp(spec.cx - lc.x, spec.cy - lc.y) < 230) {
+    lc.used = true;
+    host = (lc.id && S.ents.find(e => e.id === lc.id && !e.dead)) || { virtual: true, els: lc.els, x: spec.cx, y: spec.cy };
+  }
   if (host) {
-    const set = [...new Set([...host.els, rune.el])];
+    const set = [...new Set([...host.els, ...els])];
     els = set.length > 2 ? set.slice(-2) : set;
     power *= els.length === 1 ? 1.45 : 1.3;
-    host.dead = true; S.stats[p].fused++;
+    if (!host.virtual) host.dead = true;
+    S.stats[p].fused++;
   }
   const fused = host ? fusionName(els) : null;
-  const at = spawn(S, p, rune.form, els, spec, power, host, false);
-  w.last = { form: rune.form, els, spec: { cx: spec.cx, cy: spec.cy, w: spec.w, h: spec.h, ang: spec.ang }, power };
-  if (fused && (!S.stats[p].best || els.length > 1)) S.stats[p].best = (at.ram ? fused + ' Ram' : fused + ' ' + Fm.name);
-  S.ev.push({ type: 'cast', p, form: rune.form, els, x: at.x, y: at.y, fused, ram: !!at.ram, chain: w.chain, power, quick });
+  const at = spawn(S, p, form, els, spec, power, host, false);
+  w.last = { form, els, spec: { cx: spec.cx, cy: spec.cy, w: spec.w, h: spec.h, ang: spec.ang }, power };
+  w.lastCast = { t: S.t, x: spec.cx, y: spec.cy, id: at.id || 0, els, used: !!host };
+  if (fused && (!S.stats[p].best || els.length > 1)) S.stats[p].best = (at.ram ? fused + ' Ram' : fused + ' ' + FORMS[form].name);
+  S.ev.push({ type: 'cast', p, form, els, x: at.x, y: at.y, fused, ram: !!at.ram, chain: w.chain, power, quick, linked: !!partner });
   return { ok: true };
 }
 

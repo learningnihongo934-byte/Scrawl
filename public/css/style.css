@@ -156,3 +156,22 @@ footer { margin-top: 12px; font-size: 14px; color: var(--ink-soft); }
 #fusegrid td { border: 1px solid rgba(42,32,23,0.18); padding: 3px 4px; text-align: center; line-height: 1.15; color: var(--ink-soft); }
 #fusegrid td.fz { background: linear-gradient(135deg, color-mix(in srgb, var(--a) 10%, transparent), color-mix(in srgb, var(--b) 10%, transparent)); }
 #fusegrid td.have { color: var(--ink); font-weight: 600; background: linear-gradient(135deg, color-mix(in srgb, var(--a) 28%, transparent), color-mix(in srgb, var(--b) 28%, transparent)); border-color: rgba(42,32,23,0.45); }
+
+#fusepanel { position: absolute; left: 1%; top: 19%; width: min(250px, 19%); max-height: 60%; display: flex; flex-direction: column;
+  background: var(--paper-hi); border: 1.5px solid var(--ink); box-shadow: 4px 5px 0 rgba(20,12,6,0.4); font-size: 14px; }
+.fusehead { font-family: var(--fell-sc); font-size: 17px; padding: 6px 10px; text-align: left; display: flex; justify-content: space-between; border-bottom: 1px solid rgba(42,32,23,0.3); }
+.fusehead span { font-family: var(--fell); font-size: 12px; border: 1px solid var(--ink-soft); padding: 0 5px; color: var(--ink-soft); }
+#fusepanel.closed #fusebody { display: none; }
+#fusepanel.closed .fusehead { border-bottom: 0; }
+#fusebody { overflow-y: auto; padding: 4px 8px 6px; }
+.fusenote { font-size: 12.5px; font-style: italic; color: var(--ink-soft); margin: 2px 0 6px; line-height: 1.25; }
+#fuselist { list-style: none; margin: 0; padding: 0; }
+#fuselist li { display: flex; align-items: center; gap: 3px; padding: 3px 0; border-top: 1px dotted rgba(42,32,23,0.25); }
+#fuselist canvas { width: 24px; height: 24px; flex: none; }
+#fuselist i { font-style: normal; color: var(--ink-soft); }
+#fuselist div { margin-left: 5px; line-height: 1.1; }
+#fuselist b { font-family: var(--fell-sc); font-weight: 400; font-size: 15px; display: block; }
+#fuselist small { color: var(--ink-soft); font-size: 12px; }
+@media (max-width: 760px) { #fusepanel { width: 42%; top: 18%; } }
+
+#fusepanel[hidden], #tut[hidden], #bar[hidden] { display: none; }

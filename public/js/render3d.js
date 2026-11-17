@@ -48,8 +48,8 @@ export class Book3D {
     this.layer = new PageLayer();
     this.gl = gl; this.hud = hud; this.hg = hud.getContext('2d');
     const r = this.r = new THREE.WebGLRenderer({ canvas: gl, antialias: true, powerPreference: 'high-performance' });
-    r.setPixelRatio(Math.min(1.5, window.devicePixelRatio || 1));
-    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.setPixelRatio(Math.min(1.25, window.devicePixelRatio || 1));
+    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFShadowMap;
     r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping; r.toneMappingExposure = 1.1;
     const s = this.scene = new THREE.Scene();
     s.background = new THREE.Color('#150d08'); s.fog = new THREE.Fog('#150d08', 24, 44);
@@ -67,10 +67,10 @@ export class Book3D {
     this.wiz.forEach(m => { m.g.visible = false; s.add(m.g); });
     this.tether = mesh(new THREE.CylinderGeometry(0.035, 0.035, 1, 5, 1, true), glow('#3c6d37', 0.8, { transparent: true, opacity: 0.8 }), false);
     this.tether.visible = false; s.add(this.tether);
-    this.ents = new Map(); this.fx = []; this.ray = new THREE.Raycaster(); this.t = 0; this.upT = 0;
+    this.ents = new Map(); this.ray = new THREE.Raycaster(); this.t = 0; this.upT = 0; this.hudT = 0;
+    this.quality = 2; this.slow = 0; this.fast = 0; this.initParticles();
     this.inkLive = new Map(); this.inkAnims = []; this.hl = null; this.hlT = 0;
     this.inkMat = new THREE.MeshStandardMaterial({ color: '#1a120c', roughness: 0.28, metalness: 0.15, flatShading: true, side: THREE.DoubleSide });
-    this.shardGeo = new THREE.TetrahedronGeometry(1, 0);
     this.setView(0);
     this.resize();
   }
@@ -85,10 +85,13 @@ export class Book3D {
     this.wiz.forEach((m, p) => { const mine = p === me; m.robe.material = m.arm.material = new THREE.MeshStandardMaterial({ color: mine ? '#34507a' : '#8a3324', roughness: 0.85, flatShading: true }); m.hat.material = mat(mine ? '#22324d' : '#5a1f16'); m.brim.material = m.hat.material; });
   }
   resize() {
-    const rect = this.gl.getBoundingClientRect(), dpr = Math.min(1.5, window.devicePixelRatio || 1);
+    const rect = this.gl.getBoundingClientRect(), dev = window.devicePixelRatio || 1;
+    const dpr = this.quality >= 2 ? Math.min(1.25, dev) : this.quality === 1 ? 1 : 0.8;
     this.r.setPixelRatio(dpr); this.r.setSize(Math.max(1, rect.width), Math.max(1, rect.height), false);
+    this.r.shadowMap.enabled = this.quality >= 1;
     this.cam.aspect = rect.width / Math.max(1, rect.height); this.cam.updateProjectionMatrix();
-    this.hud.width = Math.round(rect.width * dpr); this.hud.height = Math.round(rect.height * dpr);
+    // the HUD is text and lines: device-pixel sharp up to 1.25x is plenty
+    const hd = Math.min(1.25, dev); this.hud.width = Math.round(rect.width * hd); this.hud.height = Math.round(rect.height * hd);
   }
 
   buildDesk() {
@@ -128,7 +131,6 @@ export class Book3D {
     c.add(at(mesh(new THREE.CylinderGeometry(0.6, 0.7, 0.12, 10), mat('#a07a3a', { metalness: 0.6, roughness: 0.45 })), 0, 0.06, 0));
     c.add(at(mesh(new THREE.CylinderGeometry(0.22, 0.25, 1.5, 9), mat('#efe6cf')), 0, 0.87, 0));
     this.flame = mesh(new THREE.ConeGeometry(0.09, 0.3, 6), new THREE.MeshBasicMaterial({ color: '#ffbe5c' }), false); this.flame.position.set(0, 1.78, 0); c.add(this.flame);
-    this.candle = new THREE.PointLight('#ffad5a', 3, 16, 1.6); this.candle.position.set(0, 1.9, 0); c.add(this.candle);
     s.add(c);
     // ink pot and quill
     const ink = new THREE.Group(); ink.position.set(9.7, -0.42, -3.1);
@@ -315,7 +317,7 @@ export class Book3D {
     o.g.traverse(m => { if (m.geometry) m.geometry.dispose(); });
     this.ents.delete(id);
   }
-  clearEnts() { for (const [id, o] of this.ents) this.drop3d(id, o); for (const f of this.fx) this.scene.remove(f.m); this.fx = []; this.clearInk(); }
+  clearEnts() { for (const [id, o] of this.ents) this.drop3d(id, o); for (const f of this.fx) { this.scene.remove(f.m); f.m.material.dispose(); } this.fx = []; this.parts = []; this.clearInk(); }
 
   // ---------- 3D ink: raised wet-ink ribbons standing on the paper ----------
   ribbon(pts, lift = 0.015) {
@@ -382,50 +384,62 @@ export class Book3D {
   }
   clearInk() { for (const k of [...this.inkLive.keys()]) this.liveInk(k, null); for (const a of this.inkAnims) a.t = a.life + 1; this.updateInkAnims(0); }
 
-  // ---------- particles ----------
+  // ---------- particles: one instanced mesh for every shard, trail bit and rain drop (one draw call) ----------
+  initParticles() {
+    this.pMax = 900; this.parts = [];
+    const m = new THREE.MeshLambertMaterial({ flatShading: true });
+    this.pMesh = new THREE.InstancedMesh(new THREE.TetrahedronGeometry(1, 0), m, this.pMax);
+    this.pMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.pMesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(this.pMax * 3), 3);
+    this.pMesh.frustumCulled = false; this.pMesh.count = 0; this.scene.add(this.pMesh);
+    this.pDummy = new THREE.Object3D(); this.pCol = new THREE.Color();
+    this.ringGeo = new THREE.TorusGeometry(1, 0.06, 4, 32); this.fx = [];
+  }
   shard(x, y, z, color, size, speed, up, life = 0.7, grav = 0) {
-    if (this.fx.length > 500) return;
-    const m = new THREE.Mesh(this.shardGeo, mat(color, { emissive: color, emissiveIntensity: 0.4 }));
-    m.position.set(x, y, z); m.scale.setScalar(size); m.rotation.set(R() * 6, R() * 6, 0);
+    if (this.parts.length >= this.pMax) return;
     const a = R() * Math.PI * 2, s = speed * (0.4 + R());
-    this.scene.add(m);
-    this.fx.push({ m, vx: Math.cos(a) * s, vy: up * (0.5 + R()), vz: Math.sin(a) * s, t: 0, life, grav, size });
+    this.parts.push({ x, y, z, vx: Math.cos(a) * s, vy: up * (0.5 + R()), vz: Math.sin(a) * s, t: 0, life, grav, size, c: color, rx: R() * 6, ry: R() * 6 });
   }
   drop(x, y, z, color) {
-    if (this.fx.length > 500) return;
-    const m = new THREE.Mesh(this.dropGeo ||= new THREE.BoxGeometry(0.025, 0.22, 0.025), mat(color));
-    m.position.set(x, y, z); this.scene.add(m);
-    this.fx.push({ m, vx: 0, vy: -9, vz: 0, t: 0, life: 0.34, grav: 0, size: 1, keep: true });
+    if (this.parts.length >= this.pMax) return;
+    this.parts.push({ x, y, z, vx: 0, vy: -9, vz: 0, t: 0, life: 0.34, grav: 0, size: 0.02, c: color, rx: 0, ry: 0, drop: true });
   }
   burst(x, y, els, n, speed = 3, up = 3, h = 0.5, size = 0.08) {
     const px = X(x), pz = Z(y), py = pageH(x) + h;
     for (let i = 0; i < n; i++) this.shard(px, py, pz, elc(els, i % 2), size * (0.6 + R() * 0.8), speed, up, 0.6 + R() * 0.5, 9);
   }
   flash(x, y, r, els, life = 0.5) {
-    const m = new THREE.Mesh(new THREE.TorusGeometry(1, 0.06, 4, 32), glow(elc(els), 1, { transparent: true, opacity: 0.9 }));
+    const m = new THREE.Mesh(this.ringGeo, new THREE.MeshBasicMaterial({ color: elc(els), transparent: true, opacity: 0.9 }));
     m.rotation.x = Math.PI / 2; m.position.set(X(x), pageH(x) + 0.1, Z(y)); this.scene.add(m);
-    this.fx.push({ m, ring: r * U, t: 0, life, own: true });
+    this.fx.push({ m, ring: r * U, t: 0, life });
   }
   beam(e) {
     const a = new THREE.Vector3(X(e.x1), pageH(e.x1) + 0.5, Z(e.y1)), b = new THREE.Vector3(X(e.x2), pageH(e.x2) + 0.5, Z(e.y2));
-    const len = a.distanceTo(b), m = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, len, 6, 1, true), glow(elc(e.els), 1.2, { transparent: true, opacity: 0.95 }));
+    const len = a.distanceTo(b), m = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, len, 6, 1, true), new THREE.MeshBasicMaterial({ color: elc(e.els), transparent: true, opacity: 0.95 }));
     m.position.copy(a).lerp(b, 0.5); m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
     this.scene.add(m); this.fx.push({ m, t: 0, life: 0.35, beam: true, own: true });
   }
   updateFx(dt) {
+    let n = 0;
+    const d = this.pDummy;
+    for (const p of this.parts) {
+      p.t += dt; if (p.t >= p.life) continue;
+      p.vy -= p.grav * dt; p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+      const floor = pageH(p.x / U + W / 2) + 0.02;
+      if (p.y < floor) { p.y = floor; p.vy *= -0.3; p.vx *= 0.6; p.vz *= 0.6; }
+      const k = p.t / p.life, s = p.drop ? p.size : p.size * (1 - k);
+      d.position.set(p.x, p.y, p.z); d.rotation.set(p.rx + p.t * 5, p.ry, 0); d.scale.set(s, p.drop ? 0.11 : s, s); d.updateMatrix();
+      this.pMesh.setMatrixAt(n, d.matrix); this.pMesh.setColorAt(n, this.pCol.set(p.c)); n++;
+    }
+    this.parts = this.parts.filter(p => p.t < p.life);
+    this.pMesh.count = n; this.pMesh.instanceMatrix.needsUpdate = true; if (this.pMesh.instanceColor) this.pMesh.instanceColor.needsUpdate = true;
     for (const f of this.fx) {
       f.t += dt; const k = f.t / f.life;
       if (f.ring !== undefined) { f.m.scale.setScalar(f.ring * (0.3 + k * 0.9)); f.m.material.opacity = 1 - k; }
       else if (f.beam) { f.m.material.opacity = 1 - k; f.m.scale.x = f.m.scale.z = 1 - k * 0.7; }
-      else {
-        f.vy -= (f.grav || 0) * dt; f.m.position.x += f.vx * dt; f.m.position.y += f.vy * dt; f.m.position.z += f.vz * dt;
-        const floor = pageH((f.m.position.x / U) + W / 2) + 0.02;
-        if (f.m.position.y < floor) { f.m.position.y = floor; f.vy *= -0.3; f.vx *= 0.6; f.vz *= 0.6; }
-        if (!f.keep) { f.m.scale.setScalar(f.size * (1 - k)); f.m.rotation.x += dt * 5; }
-      }
     }
     const done = this.fx.filter(f => f.t >= f.life);
-    for (const f of done) { this.scene.remove(f.m); if (f.own) { f.m.geometry.dispose(); f.m.material.dispose(); } }
+    for (const f of done) { this.scene.remove(f.m); f.m.material.dispose(); if (f.own) f.m.geometry.dispose(); }
     if (done.length) this.fx = this.fx.filter(f => f.t < f.life);
   }
 
@@ -549,8 +563,14 @@ export class Book3D {
     this.cam.position.set(this.camBase.x + (R() - 0.5) * sh, this.camBase.y + (R() - 0.5) * sh, this.camBase.z + (R() - 0.5) * sh);
     this.cam.lookAt(this.camLook);
     const fl = 0.85 + Math.sin(this.t * 13) * 0.08 + Math.sin(this.t * 7.3) * 0.07 + (R() - 0.5) * 0.05;
-    this.candle.intensity = 3 * fl; this.flame.scale.set(1, fl, 1);
+    this.flame.scale.set(1, fl, 1);
     this.r.render(this.scene, this.cam);
-    this.layer.drawOverlay(this.hg, S, view, dt, (x, y) => this.project(x, y));
+    // HUD at ~30 fps
+    this.hudT += dt;
+    if (this.hudT >= 1 / 30) { this.layer.drawOverlay(this.hg, S, view, this.hudT, (x, y) => this.project(x, y)); this.hudT = 0; }
+    // automatic quality: step down when frames run long, back up when there is headroom
+    if (dt > 0.026) { this.slow += dt; this.fast = 0; } else if (dt < 0.014) { this.fast += dt; this.slow = Math.max(0, this.slow - dt * 0.5); }
+    if (this.slow > 1.5 && this.quality > 0) { this.quality--; this.slow = 0; this.resize(); }
+    else if (this.fast > 8 && this.quality < 2) { this.quality++; this.fast = 0; this.resize(); }
   }
 }

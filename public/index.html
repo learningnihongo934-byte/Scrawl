@@ -16,6 +16,13 @@
   <canvas id="gl"></canvas>
   <canvas id="hud"></canvas>
   <div id="bar" hidden><button id="leave" class="link">Leave</button></div>
+  <aside id="fusepanel" hidden>
+    <button id="fusehead" class="fusehead">Your fusions <span>F</span></button>
+    <div id="fusebody">
+      <p class="fusenote">Draw two runes connected, or one right after the other close by. The second rune sets the form. Drawing over your own spell fuses too.</p>
+      <ul id="fuselist"></ul>
+    </div>
+  </aside>
   <aside id="tut" hidden>
     <p id="tutstep" class="step"></p>
     <p id="tuttext"></p>
@@ -103,7 +110,7 @@
       </div>
       <div>
         <h4>Fusions</h4>
-        <p>Draw a rune on top of one of your own walls, sigils or orbs to fuse them: fire on storm makes Plasma, frost on earth makes Glacier, and so on. A bolt drawn on your own wall launches the whole wall as a <b>Ram</b>.</p>
+        <p>Three ways to fuse two runes into one stronger spell with both elements: draw them <b>connected</b> as one drawing (even one continuous stroke), draw the second <b>right after</b> the first close by, or draw a rune <b>on top of</b> one of your own spells. The second rune sets the form, and Wall + Bolt makes a <b>Ram</b>. Fire and Storm make Plasma, Frost and Earth make Glacier, and so on: your fusions are listed on the left during a duel (press F), and all 66 are in the Runebook.</p>
         <h4>Flourish</h4>
         <p>Cast again within 1.6 seconds and the next spell grows stronger, up to ×1.4.</p>
         <h4>Elements</h4>
